@@ -70,7 +70,7 @@ function infraCell(value,fieldState={}){if(value)return `<div class="stack-cell"
 function hubDef(id){return (snapshot.hubs||[]).find(h=>h.id===id)||null;}
 function hubConnMap(p){const m={};for(const c of (p.hubs||[]))m[c.hub_id]=c;return m;}
 function hubCell(p){
-  const defs={auth:'AUTH',pay:'PAY',localize:'LOC'}, conns=hubConnMap(p);
+  const defs={auth:'AUTH',pay:'PAY',localize:'LOC',site:'SITE'}, conns=hubConnMap(p);
   const items=Object.entries(defs).filter(([id])=>conns[id]?.enabled).map(([id,label])=>{const c=conns[id],h=hubDef(id),st=c.status||h?.status||'unknown';return `<span class="hub-mini ${esc(st)}" title="${esc(h?.name||id)} · ${esc(c.message||h?.message||statusText[st]||'미확인')}">${label}</span>`});
   return items.length?`<div class="hub-cell">${items.join('')}</div>`:`<div class="hub-cell empty-stack"></div>`;
 }
@@ -373,7 +373,7 @@ async function detectAllInfrastructure(){
 
 function fillProjectHubs(form,p){
   const m=hubConnMap(p||{});
-  for(const id of ['auth','pay','localize']){
+  for(const id of ['auth','pay','localize','site']){
     const c=m[id]||{},h=hubDef(id),input=form[`hub_${id}_enabled`];
     input.checked=!!c.enabled;
     input.indeterminate=!!(h?.mode==='active'&&h?.sync_status==='down'&&(!c.source||c.source==='sync-error'));
@@ -383,7 +383,7 @@ function fillProjectHubs(form,p){
     if(el){el.textContent=statusText[st]||st;el.title=c.message||h?.sync_message||'';}
   }
 }
-function projectHubsFromForm(form){return ['auth','pay','localize'].map(id=>({hub_id:id,enabled:form[`hub_${id}_enabled`].checked,probe_url:form[`hub_${id}_probe`].value.trim(),status:form[`hub_${id}_enabled`].checked?'unknown':'disabled'}));}
+function projectHubsFromForm(form){return ['auth','pay','localize','site'].map(id=>({hub_id:id,enabled:form[`hub_${id}_enabled`].checked,probe_url:form[`hub_${id}_probe`].value.trim(),status:form[`hub_${id}_enabled`].checked?'unknown':'disabled'}));}
 async function syncProjectHubs(projectId,desired,current){const before=hubConnMap(current||{}),errors=[];for(const d of desired){const h=hubDef(d.hub_id);if(!h||h.mode!=='active'){if(d.enabled)errors.push(`${h?.name||d.hub_id}: 아직 활성 Hub가 아닙니다.`);continue}const prev=before[d.hub_id]||{};if(!!prev.enabled===!!d.enabled&&String(prev.probe_url||'').trim()===String(d.probe_url||'').trim())continue;try{await api(`/api/projects/${encodeURIComponent(projectId)}/hubs/${encodeURIComponent(d.hub_id)}`,{method:'PUT',body:JSON.stringify({enabled:!!d.enabled,probe_url:d.probe_url||''})})}catch(err){errors.push(`${h.name}: ${err.message}`)}}return errors;}
 function openHubDialog(){
   const rows=$('#hubSettingsRows');
