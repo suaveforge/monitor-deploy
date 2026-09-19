@@ -1,6 +1,7 @@
 (()=>{
   'use strict';
   const state={view:'operations',days:7,data:null,project:null,loading:false,lastFetched:0,refreshTimer:null,selectedProjectId:'',selectedProjectData:null,selectedProjectDays:0,selectedProjectLoading:false,selectedProjectError:''};
+  try{document.cookie='sitehub_internal=owner; Max-Age=31536000; Path=/; Domain=.suaveforge.com; SameSite=Lax; Secure'}catch{}
   const q=(s,r=document)=>r.querySelector(s),qa=(s,r=document)=>[...r.querySelectorAll(s)];
   const E=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const num=v=>new Intl.NumberFormat('ko-KR').format(Number(v||0));
@@ -13,8 +14,10 @@
   const statusHelp={pass:'현재 점검 기준을 통과했습니다.',fail:'현재 점검 기준에서 문제가 발견되었습니다. 세부 근거를 확인하세요.',normal:'현재 정상적으로 수집·응답하고 있습니다.',unknown:'확인 가능한 데이터가 부족해 상태를 확정하지 못했습니다.',not_checked:'아직 점검 결과가 없습니다.',not_applicable:'이 프로젝트에는 적용되지 않는 항목입니다.',missing_loader:'수집 스크립트가 설치되지 않았거나 감지되지 않았습니다.',no_events:'수집 스크립트는 있지만 최근 이벤트가 없습니다.',stale:'예전에는 수집됐지만 최근에는 새 이벤트가 들어오지 않았습니다.',pending:'데이터 공급자가 아직 이 지표를 제공하지 않아 기다리는 상태입니다.',unsupported:'현재 공급자가 이 지표를 지원하지 않습니다.'};
   const chip=(s,label='')=>{const help=statusHelp[s]||'';return `<span class="obs-chip ${statusTone(s)}" ${help?`title="${E(help)}"`:''}><i></i>${E(label||statusLabel[s]||s||'미확인')}</span>`};
   const glossary={
-    pv:'PV는 Page View의 약자입니다. 페이지가 열린 총 횟수입니다. 같은 방문자가 여러 페이지를 보거나 같은 페이지를 다시 열면 모두 포함됩니다.',
-    uv:'UV는 Unique Visitor의 약자입니다. 선택 기간 동안 SiteHub의 익명 visitor 기준으로 구분된 방문자 수입니다. 실제 사람 수와 완전히 같지는 않을 수 있습니다.',
+    pv:'PV는 Page View의 약자입니다. 기본 표시값은 명시적으로 확인된 내부·QA·자동화 접근을 제외한 정제 PV입니다.',
+    uv:'UV는 Unique Visitor의 약자입니다. 기본 표시값은 명시적으로 확인된 내부·QA·자동화 접근을 제외한 익명 visitor 기준 정제 UV입니다. 실제 사람 수와 완전히 같지는 않을 수 있습니다.',
+    cleantraffic:'기본 Analytics 숫자는 명시적으로 확인된 내부 사용자, QA, 자동화 세션과 세션 분류가 불가능한 이벤트를 제외합니다. 같은 사이트 내부 이동처럼 실제 사용일 수 있는 트래픽은 임의로 제거하지 않습니다.',
+    excludedtraffic:'제외 트래픽은 원본에는 들어왔지만 내부·QA·자동화로 확정되어 기본 PV/UV에서 빠진 접근입니다. 펼치면 원본 수치와 제외 사유를 볼 수 있습니다.',
     analytics:'사이트에서 실제 방문 이벤트가 SiteHub로 들어오고 있는지 보는 항목입니다.',
     namecard:'검색 결과와 링크 공유에 필요한 페이지 기본 신원 정보입니다. 제목, 설명, 대표 이미지, canonical 같은 메타데이터 누락을 점검합니다.',
     seo:'검색 기본 점검(SEO)은 검색엔진이 페이지를 읽고 대표 URL·메타·링크·사이트맵 같은 기본 구조를 이해할 수 있는지 확인합니다.',
@@ -142,7 +145,25 @@
   }
 
   function metric(label,value,sub='',tone='',tipKey=''){return `<article class="obs-metric ${tone}"><span>${tipKey?term(label,tipKey):E(label)}</span><strong>${E(value)}</strong><small>${sub}</small></article>`}
-  function obsWebApplicable(p){return Boolean(String(p?.public_url||'').trim())}
+  function excludedReasonLabel(reason){
+    return ({internal_qa:'QA',internal_qa_legacy:'과거 QA',internal_owner:'내부 사용자',internal_automation:'자동화',internal_automation_legacy:'과거 자동화',unclassified_no_session:'미분류 이벤트'})[reason]||String(reason||'기타');
+  }
+  function renderExcludedTraffic(t){
+    const pv=Number(t?.selected_excluded_pv||0),uv=Number(t?.selected_excluded_uv||0);
+    if(pv<=0&&uv<=0)return '';
+    const rows=Array.isArray(t?.excluded)?t.excluded:[];
+    return `<details class="obs-card obs-excluded-card">
+      <summary><span><b>정제 전 수치 보기</b><small>내부·QA·자동화 제외 ${num(pv)} PV · ${num(uv)} UV</small></span><strong>펼치기</strong></summary>
+      <div class="obs-excluded-grid">
+        <div><span>기본 표시</span><b>${num(t.selected_pv)} PV</b><small>${num(t.selected_uv)} UV · clean</small></div>
+        <div><span>원본 수집</span><b>${num(t.selected_raw_pv)} PV</b><small>${num(t.selected_raw_uv)} UV · raw</small></div>
+        <div><span>기본 제외</span><b>−${num(pv)} PV</b><small>−${num(uv)} UV</small></div>
+      </div>
+      <div class="obs-excluded-reasons">${rows.length?rows.map(x=>`<span><b>${E(excludedReasonLabel(x.reason))}</b><small>${num(x.pv)} PV · ${num(x.uv)} UV</small></span>`).join(''):'<span><b>제외 내역 없음</b></span>'}</div>
+      <p>${term('정제 기준','cleantraffic')} · ${term('제외 트래픽','excludedtraffic')}</p>
+    </details>`;
+  }
+    function obsWebApplicable(p){return Boolean(String(p?.public_url||'').trim())}
   function obsApplicability(tot,ps){const webProjects=ps.filter(obsWebApplicable),has=Object.prototype.hasOwnProperty.call(tot,'web_applicable_projects'),webTotal=has?Number(tot.web_applicable_projects||0):webProjects.length,notApplicable=has?Number(tot.web_not_applicable_projects||0):Math.max(0,ps.length-webProjects.length),analyticsNormal=has?Number(tot.analytics_normal||0):webProjects.filter(p=>p.analytics_status==='normal').length,analyticsMissing=has?Number(tot.analytics_missing||0):webProjects.filter(p=>['missing_loader','missing'].includes(p.analytics_status)).length,analyticsStale=has?Number(tot.analytics_stale||0):webProjects.filter(p=>p.analytics_status==='stale').length,analyticsIssue=has?Number(tot.analytics_issue||0):Math.max(0,webTotal-analyticsNormal),indexUnknown=has?Number(tot.index_unknown_projects||0):webProjects.filter(p=>!p.search||p.search.google_index?.status==='unknown'||p.search.google_index?.source==='unavailable').length,indexVerified=has?Number(tot.index_verified_projects||0):Math.max(0,webTotal-indexUnknown);return {webProjects,webTotal,notApplicable,analyticsNormal,analyticsMissing,analyticsStale,analyticsIssue,indexUnknown,indexVerified}}
   const numMaybe=v=>v===null||v===undefined||v===''?'-':num(v);
   function videoSEOState(p){
@@ -178,7 +199,8 @@
     root.innerHTML=`
       <div class="obs-head"><div><p class="eyebrow">SITEHUB ANALYTICS</p><h2>전체 Analytics</h2><p>Monitor registry ${num(tot.registry_projects)}개 프로젝트의 SiteHub 수집 상태와 유입을 한 화면에서 봅니다.</p></div><div class="obs-head-actions"><button class="button" id="obsRefresh">새로고침</button><span>마지막 ${ago(d.generated_at)}</span></div></div>
       ${periodControls()}
-      <div class="obs-metrics">${metric('오늘 PV',num(t.today_pv),delta,'','pv')}${metric('오늘 UV',num(t.today_uv),'익명 visitor 기준','','uv')}${metric('최근 7일 PV',num(t.pv_7d),`UV ${num(t.uv_7d)}`,'','pv')}${metric('최근 30일 PV',num(t.pv_30d),`UV ${num(t.uv_30d)}`,'','pv')}${metric('정상 수집',`${num(app.analyticsNormal)} / ${num(app.webTotal)}`,`미설치 ${num(app.analyticsMissing)} · 장기미수신 ${num(app.analyticsStale)} · 해당 없음 ${num(app.notApplicable)}`,app.analyticsIssue?'attention':'','analytics')}${metric('SiteHub 적용',`${num(tot.sitehub_connected)} / ${num(tot.registry_projects)}`,`미적용 ${num(tot.sitehub_missing)}`,tot.sitehub_missing?'attention':'') }</div>
+      <div class="obs-metrics">${metric('오늘 PV',num(t.today_pv),`${delta} · 정제값`,'','pv')}${metric('오늘 UV',num(t.today_uv),'내부·QA·자동화 제외','','uv')}${metric('최근 7일 PV',num(t.pv_7d),`UV ${num(t.uv_7d)} · 정제값`,'','pv')}${metric('최근 30일 PV',num(t.pv_30d),`UV ${num(t.uv_30d)} · 정제값`,'','pv')}${metric('정상 수집',`${num(app.analyticsNormal)} / ${num(app.webTotal)}`,`미설치 ${num(app.analyticsMissing)} · 장기미수신 ${num(app.analyticsStale)} · 해당 없음 ${num(app.notApplicable)}`,app.analyticsIssue?'attention':'','analytics')}${metric('SiteHub 적용',`${num(tot.sitehub_connected)} / ${num(tot.registry_projects)}`,`미적용 ${num(tot.sitehub_missing)}`,tot.sitehub_missing?'attention':'') }</div>
+      ${renderExcludedTraffic(t)}
       ${renderTrend(trendRows,app.webProjects,state.selectedProjectId,trendName,state.selectedProjectLoading,state.selectedProjectError)}
       <div class="obs-two-col">
         <article class="obs-card"><div class="obs-card-head"><div><span class="metric-kicker">PROJECTS</span><h3>상위 프로젝트</h3></div><small>클릭하면 위 그래프가 해당 프로젝트로 전환 · 선택 기간 ${state.days}일</small></div>${renderRankedProjects(t.top_projects||[])}</article>
