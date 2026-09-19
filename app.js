@@ -148,23 +148,46 @@ function notifyActionTransitions(next){
   if(notices.length){const type=notices.some(n=>n.type==='failure')?'failure':notices.some(n=>n.type==='queued')?'queued':'success';toast(notices.map(n=>n.text).join(' / '),type,5000);}
 }
 function renderActions(){
-  const a=actionsSnapshot||{},sum=a.summary||{},runner=a.target_runner||null,queue=a.queue||[],failures=a.recent_failures||[],repos=a.repositories||[];
+  const a=actionsSnapshot||{},sum=a.summary||{},runners=(Array.isArray(a.runners)&&a.runners.length?a.runners:(a.target_runner?[a.target_runner]:[])),queue=a.queue||[],failures=a.recent_failures||[],repos=a.repositories||[];
   const meta=$('#actionsMeta');if(!meta)return;
   const rate=a.rate_remaining?` · API 잔여 ${a.rate_remaining}`:'';
   meta.textContent=a.generated_at?`${a.org||'suaveforge'} · ${since(a.generated_at)} 갱신${rate}${a.message?` · ${a.message}`:''}`:`${a.org||'suaveforge'} Actions 상태 확인 대기${a.message?` · ${a.message}`:''}`;
   $('#actionsRepoCount').textContent=sum.repositories||0;$('#actionsQueuedCount').textContent=sum.queued||0;$('#actionsRunningCount').textContent=sum.in_progress||0;$('#actionsSuccessCount').textContent=sum.success||0;$('#actionsFailureCount').textContent=sum.failure||0;
   const tabBadge=$('#actionsTabBadge'),tabActive=Number(sum.queued||0)+Number(sum.in_progress||0);if(tabBadge){tabBadge.textContent=String(tabActive);tabBadge.hidden=tabActive===0;}
-  $('#actionsRunnerName').textContent=a.target_runner_name||'123-suaveforge-org-01';
+
+  const source=a.runner_source||'',permissionLimited=a.token_state==='runner_permission_limited'||source==='workflow_jobs';
+  $('#actionsRunnerName').textContent=runners.length?`${runners.length}대 runner pool`:'runner pool 확인 대기';
   const runnerState=$('#actionsRunnerState'),runnerPanel=$('#actionsRunnerPanel'),current=$('#actionsRunnerCurrent');
+  const offline=runners.filter(r=>['offline','missing'].includes(String(r.status||'').toLowerCase())).length;
+  const busy=runners.filter(r=>!!r.busy).length;
+  const online=runners.filter(r=>String(r.status||'').toLowerCase()==='online').length;
   let rst='unknown',rlabel='미검출';
-  if(runner){if(String(runner.status).toLowerCase()!=='online'){rst='offline';rlabel='OFFLINE'}else if(runner.busy){rst='busy';rlabel='BUSY'}else{rst='idle';rlabel='IDLE'}}
-  runnerState.className=`actions-state ${actionSeverityClass(rst)}`;runnerState.textContent=rlabel;runnerPanel.classList.toggle('critical',rst==='offline');
-  if(!runner){current.className='actions-panel-body muted';current.textContent=a.token_state==='permission_error'?'runner 조회 권한 확인 필요':'조직 runner 목록에서 대상 runner를 찾지 못했습니다.'}
-  else if(runner.current_job){current.className='actions-panel-body';current.innerHTML=`<div class="runner-current"><strong>${esc(runner.current_repository)} · ${esc(runner.current_job)}</strong><small>${esc(runner.current_workflow||'workflow')} · 실행 ${actionDuration(runner.current_seconds)}</small><div class="runner-current-meta"><span>${esc(runner.os||'-')}</span><span>RUN #${esc(runner.current_run_id||'-')}</span><span>JOB ${esc(runner.current_job_id||'-')}</span></div></div>`}
-  else{current.className='actions-panel-body muted';current.innerHTML=`${runner.busy?'BUSY · 현재 job 매핑 재확인 중':'현재 점유 작업 없음'}<div class="runner-current-meta"><span>${esc(runner.os||'-')}</span><span>${esc((runner.labels||[]).join(' · ')||'labels 없음')}</span></div>`}
+  if(permissionLimited){rst='queued';rlabel='권한 제한'}
+  else if(offline>0){rst='offline';rlabel=`OFFLINE ${offline}`}
+  else if(runners.length&&busy===runners.length){rst='busy';rlabel=`BUSY ${busy}/${runners.length}`}
+  else if(runners.length){rst='idle';rlabel=`사용 ${busy}/${runners.length}`}
+  runnerState.className=`actions-state ${actionSeverityClass(rst)}`;runnerState.textContent=rlabel;runnerPanel.classList.toggle('critical',!permissionLimited&&offline>0);
+
+  if(!runners.length){current.className='actions-panel-body muted';current.textContent='runner pool을 아직 관찰하지 못했습니다.'}
+  else{
+    current.className='actions-panel-body';
+    current.innerHTML=`<div class="actions-runner-pool">${runners.map(r=>{
+      const st=String(r.status||'unknown').toLowerCase();
+      let tone='unknown',label='상태 미확인';
+      if(st==='online'&&r.busy){tone='in_progress';label='BUSY'}
+      else if(st==='online'){tone='success';label='IDLE'}
+      else if(st==='offline'||st==='missing'){tone='failure';label=st==='offline'?'OFFLINE':'미검출'}
+      else if(st==='observed'){tone='queued';label='최근 관찰'}
+      else if(permissionLimited){tone='unknown';label='권한 제한'}
+      const work=r.current_job?`<small>${esc(r.current_repository||'-')} · ${esc(r.current_job)} · ${actionDuration(r.current_seconds)}</small>`:`<small>${permissionLimited?'조직 runner API 권한 연결 시 online/idle 확인 가능':'현재 점유 작업 없음'}</small>`;
+      const labels=(r.labels||[]).join(' · ');
+      return `<div class="actions-runner-card"><div><strong>${esc(r.name||'runner')}</strong><em class="actions-state ${tone}">${label}</em></div>${work}<span>${esc(r.os||'')}${labels?` · ${esc(labels)}`:''}</span></div>`
+    }).join('')}</div>`;
+  }
+
   const targetQueue=queue.filter(q=>q.targets_target_runner),otherQueue=queue.filter(q=>!q.targets_target_runner);
   const ordered=[...targetQueue,...otherQueue];$('#actionsQueueState').className=`actions-state ${ordered.some(q=>q.long_queued)?'queued':'unknown'}`;$('#actionsQueueState').textContent=`${targetQueue.length} / 전체 ${queue.length}`;
-  $('#actionsQueueList').innerHTML=ordered.length?ordered.map(q=>{const sev=Number(q.wait_seconds||0)>=1200?'critical':q.long_queued?'long':'';const target=q.targets_target_runner?'123 runner':'다른 runner';return `<div class="actions-list-item ${sev}"><span class="queue-index">${q.target_queue_position||q.queue_position||'-'}</span><div><strong>${esc(q.repository)} · ${esc(q.name)}</strong><small>${esc(q.workflow||'workflow')} · ${target} · 대기 ${actionDuration(q.wait_seconds)}</small><small class="cause">${esc(q.reason||'원인 확인 중')}</small></div></div>`}).join(''):'<div class="actions-empty">queued job 없음</div>';
+  $('#actionsQueueList').innerHTML=ordered.length?ordered.map(q=>{const sev=Number(q.wait_seconds||0)>=1200?'critical':q.long_queued?'long':'';const compat=Array.isArray(q.compatible_runners)?q.compatible_runners:[],target=q.targets_target_runner?`runner pool ${compat.length?compat.length+'대 호환':''}`:'다른 runner';return `<div class="actions-list-item ${sev}"><span class="queue-index">${q.target_queue_position||q.queue_position||'-'}</span><div><strong>${esc(q.repository)} · ${esc(q.name)}</strong><small>${esc(q.workflow||'workflow')} · ${target} · 대기 ${actionDuration(q.wait_seconds)}</small><small class="cause">${esc(q.reason||'원인 확인 중')}</small></div></div>`}).join(''):'<div class="actions-empty">queued job 없음</div>';
   $('#actionsFailureState').className=`actions-state ${failures.length?'failure':'success'}`;$('#actionsFailureState').textContent=String(failures.length);
   $('#actionsFailureList').innerHTML=failures.length?failures.map(f=>`<div class="actions-list-item failure-item"><div><strong>${esc(f.repository)} · ${esc(f.failed_job||f.workflow||'workflow')}</strong><small>${f.completed_at?since(f.completed_at):'-'} · ${esc(f.conclusion||'failure')}</small><small class="cause">${esc(f.cause||'실패 원인 확인 중')}</small>${f.run_url?`<small><a href="${esc(f.run_url)}" target="_blank" rel="noreferrer">GitHub run 열기 ↗</a></small>`:''}</div></div>`).join(''):'<div class="actions-empty">최근 실패 없음</div>';
   $('#actionsRepoRows').innerHTML=repos.length?repos.map(r=>`<div class="actions-repo-row"><span><strong>${esc(r.full_name)}</strong><small>${esc(r.visibility||'')} · #${esc(r.run_number||'-')}</small></span><span><strong>${esc(r.workflow||'workflow')}</strong><small>${esc(r.branch||'-')} · ${esc(r.event||'-')}</small></span><span><em class="actions-run-pill ${esc(r.status||'unknown')}">${actionStateLabel(r.status)}</em></span><span><strong>${r.status==='queued'?`대기 ${actionDuration(r.queue_seconds)}`:`실행 ${actionDuration(r.duration_seconds)}`}</strong><small>${esc(r.conclusion||'')}</small></span><span><strong>${r.updated_at?since(r.updated_at):'-'}</strong>${r.run_url?`<small><a href="${esc(r.run_url)}" target="_blank" rel="noreferrer">run ↗</a></small>`:''}</span></div>`).join(''):'<div class="actions-empty">최근 Actions run이 있는 repo가 없습니다.</div>';
