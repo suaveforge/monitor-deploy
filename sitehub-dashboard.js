@@ -51,7 +51,26 @@
     sitehub:'SiteHub는 Analytics·NameCard·SearchOps 같은 공통 웹 기능을 프로젝트별로 수집·점검하는 공용 Hub입니다.',
     issues:'확인할 항목은 Monitor와 SiteHub가 실제 점검에서 발견한 운영·수집·검색 관련 문제만 표시합니다.'
   };
-  const term=(label,key)=>{const tip=glossary[key]||'';return tip?`<span class="obs-term" tabindex="0" data-tip="${E(tip)}" title="${E(tip)}" aria-label="${E(label)}: ${E(tip)}">${E(label)}<b>?</b></span>`:E(label)};
+  const term=(label,key)=>{const tip=glossary[key]||'';return tip?`<span class="obs-term" tabindex="0" data-tip="${E(tip)}" aria-label="${E(label)}: ${E(tip)}">${E(label)}<b>?</b></span>`:E(label)};
+  function floatingTip(){
+    let tip=q('#obsFloatingTip');
+    if(!tip){tip=document.createElement('div');tip.id='obsFloatingTip';tip.className='obs-floating-tip';tip.setAttribute('role','tooltip');tip.hidden=true;document.body.appendChild(tip)}
+    return tip;
+  }
+  function showFloatingTip(el){
+    const text=String(el?.dataset?.tip||'').trim();if(!text)return;
+    const tip=floatingTip();tip.textContent=text;tip.hidden=false;tip.classList.add('show');tip.style.left='0px';tip.style.top='0px';
+    const r=el.getBoundingClientRect(),tr=tip.getBoundingClientRect(),gap=10,margin=8;
+    let left=r.left+(r.width-tr.width)/2;
+    left=Math.max(margin,Math.min(window.innerWidth-tr.width-margin,left));
+    let top=r.top-tr.height-gap,placement='top';
+    if(top<margin){top=r.bottom+gap;placement='bottom'}
+    if(top+tr.height>window.innerHeight-margin){top=Math.max(margin,window.innerHeight-tr.height-margin)}
+    tip.dataset.placement=placement;tip.style.left=`${Math.round(left)}px`;tip.style.top=`${Math.round(top)}px`;
+    el.setAttribute('aria-describedby','obsFloatingTip');
+  }
+  function hideFloatingTip(el){const tip=q('#obsFloatingTip');if(tip){tip.classList.remove('show');tip.hidden=true}el?.removeAttribute?.('aria-describedby')}
+
   const dayLabel=v=>{const d=validDate(v);return d?new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric'}).format(d):String(v||'').replace(/^\d{4}-/,'')};
   const alertText={
     site_down:'서비스 접속 장애: Monitor가 운영 서비스가 정상 응답하지 않는 상태를 감지했습니다.',
@@ -77,11 +96,20 @@
     q('#monitorTabSearch')?.addEventListener('click',()=>setView('search'));
     for(const id of ['#monitorTabOperations','#monitorTabActions'])q(id)?.addEventListener('click',exitObservability);
     document.addEventListener('click',e=>{
+      const detail=e.target.closest('[data-obs-detail-project]');
+      if(detail){e.preventDefault();e.stopPropagation();openProject(detail.dataset.obsDetailProject);return}
       const chartProject=e.target.closest('[data-obs-chart-project]');
       if(chartProject){e.preventDefault();selectAnalyticsProject(chartProject.dataset.obsChartProject);return}
       const b=e.target.closest('[data-obs-project]');if(b)openProject(b.dataset.obsProject);
       if(e.target.closest('[data-obs-close]'))q('#obsProjectDialog')?.close();
     });
+    document.addEventListener('pointerover',e=>{const el=e.target.closest?.('.obs-term');if(el)showFloatingTip(el)});
+    document.addEventListener('pointerout',e=>{const el=e.target.closest?.('.obs-term');if(el&&!el.contains(e.relatedTarget))hideFloatingTip(el)});
+    document.addEventListener('focusin',e=>{const el=e.target.closest?.('.obs-term');if(el)showFloatingTip(el)});
+    document.addEventListener('focusout',e=>{const el=e.target.closest?.('.obs-term');if(el)hideFloatingTip(el)});
+    window.addEventListener('scroll',()=>hideFloatingTip(),true);
+    window.addEventListener('resize',()=>hideFloatingTip());
+
   }
 
   function exitObservability(){
@@ -251,9 +279,9 @@
     const data=hoverData(rows,['pv','uv']),series=E(JSON.stringify([['pv','PV'],['uv','UV']]));
     return `<article class="obs-card obs-trend"><div class="obs-card-head"><div><span class="metric-kicker">TRAFFIC TREND</span><h3>${E(selectedName)} 방문 추이</h3><p class="obs-trend-help">프로젝트를 바꿔가며 같은 그래프에서 확인합니다. 그래프 위에 마우스를 올리면 날짜별 PV·UV가 표시됩니다.</p></div>${picker}</div><div class="obs-chart"><div class="obs-hover-plot" data-trend='${data}' data-series='${series}' data-w="${w}" data-pad="${p}"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="PV와 UV 일별 추이"><polyline class="pv" points="${pvPts}"></polyline><polyline class="uv" points="${uvPts}"></polyline></svg><i class="obs-hover-line"></i><div class="obs-hover-tooltip"></div></div><div class="obs-chart-legend"><span><i class="pv"></i>PV</span><span><i class="uv"></i>UV</span><strong>${E(trendDelta(rows,'pv'))}</strong></div><div class="obs-chart-axis"><span>${E(dayLabel(rows[0]?.day||''))}</span><strong>최고 ${num(max)}</strong><span>${E(dayLabel(rows[rows.length-1]?.day||''))}</span></div></div></article>`
   }
-  function renderRankedProjects(rows){if(!rows.length)return '<p class="obs-empty">집계 데이터가 없습니다.</p>';const max=Math.max(1,...rows.map(x=>Number(x.pv||0)));return `<div class="obs-ranking">${rows.slice(0,12).map((p,i)=>`<button data-obs-chart-project="${E(p.project_id)}" class="${state.selectedProjectId===p.project_id?'active':''}"><em>${i+1}</em><span><b>${E(p.name||p.project_id)}</b><small>${E(p.project_id)} · UV ${num(p.uv)} · 클릭하면 위 그래프 전환</small><i style="--bar:${Math.max(3,Number(p.pv||0)/max*100)}%"></i></span><strong>${num(p.pv)}<small>PV</small></strong></button>`).join('')}</div>`}
+  function renderRankedProjects(rows){if(!rows.length)return '<p class="obs-empty">집계 데이터가 없습니다.</p>';const max=Math.max(1,...rows.map(x=>Number(x.pv||0)));return `<div class="obs-ranking">${rows.slice(0,12).map((p,i)=>`<div class="obs-ranking-row ${state.selectedProjectId===p.project_id?'active':''}"><button class="obs-ranking-main" data-obs-chart-project="${E(p.project_id)}" aria-label="${E(p.name||p.project_id)} 그래프로 보기"><em>${i+1}</em><span><b>${E(p.name||p.project_id)}</b><small>${E(p.project_id)} · UV ${num(p.uv)} · 클릭하면 위 그래프 전환</small><i style="--bar:${Math.max(3,Number(p.pv||0)/max*100)}%"></i></span><strong>${num(p.pv)}<small>PV</small></strong></button><button class="obs-detail-button" data-obs-detail-project="${E(p.project_id)}" aria-label="${E(p.name||p.project_id)} 상세 보기">상세</button></div>`).join('')}</div>`}
   function eventAge(p){const d=validDate(p?.last_event_at);if(d)return `마지막 ${ago(d)}`;if(['missing_loader','no_events'].includes(p?.analytics_status))return '수집 기록 없음';return '기록 없음'}
-  function statusLine(p,s){return `<button class="obs-status-row" data-obs-chart-project="${E(p.project_id)}"><span>${chip(s)}</span><b>${E(p.name||p.project_id)}</b><small>${eventAge(p)}</small><strong>${num(p.today_pv)} PV</strong></button>`}
+  function statusLine(p,s){return `<div class="obs-status-row-wrap"><button class="obs-status-row" data-obs-chart-project="${E(p.project_id)}" aria-label="${E(p.name||p.project_id)} 그래프로 보기"><span>${chip(s)}</span><b>${E(p.name||p.project_id)}</b><small>${eventAge(p)}</small><strong>${num(p.today_pv)} PV</strong></button><button class="obs-detail-button compact" data-obs-detail-project="${E(p.project_id)}" aria-label="${E(p.name||p.project_id)} 상세 보기">상세</button></div>`}
   function renderPages(rows){if(!rows.length)return '<p class="obs-empty">페이지 데이터가 없습니다.</p>';return `<div class="obs-simple-table">${rows.slice(0,14).map(x=>`<button data-obs-project="${E(x.project_id)}"><span><b>${E(x.pathname||'/')}</b><small>${E(x.hostname||'')} · ${E(x.project_id)}</small></span><strong>${num(x.pv)} PV</strong></button>`).join('')}</div>`}
   function renderReferrers(rows){if(!rows.length)return '<p class="obs-empty">referrer 데이터가 없습니다.</p>';return `<div class="obs-simple-table">${rows.slice(0,14).map(x=>`<button data-obs-project="${E(x.project_id)}"><span><b>${E(x.referrer_host||'Direct / Unknown')}</b><small>${E(x.project_id)}</small></span><strong>${num(x.pv)} PV</strong></button>`).join('')}</div>`}
 
@@ -272,8 +300,7 @@
     const body=q('#obsSearchRows');if(!body)return;const term=(q('#obsSearchFilter')?.value||'').trim().toLowerCase(),flt=q('#obsSearchState')?.value||'all';
     const webProjects=ps.filter(obsWebApplicable);
     const rows=webProjects.filter(p=>{const s=p.search||{};if(term&&!`${p.project_id} ${p.name} ${p.public_url}`.toLowerCase().includes(term))return false;if(flt==='fail'&&!['fail'].includes(s.seo_status)&&!['fail'].includes(s.aeo_status)&&!['fail'].includes(s.geo_status)&&s.readiness!=='fail')return false;if(flt==='pass'&&s.readiness!=='pass')return false;if(flt==='video'&&videoSEOState(p).alerts.length===0)return false;if(flt==='unknown'&&s.google_index?.status!=='unknown'&&s.readiness!=='not_checked'&&!(!p.search))return false;return true});
-    body.innerHTML=rows.length?rows.map(p=>{const s=p.search||{},idx=s.google_index||{},nc=p.namecard_status==='normal'?'pass':'fail',vs=videoSEOState(p);const idxLabel=idx.status==='unknown'?'Unknown':idx.indexed!=null?`${num(idx.indexed)} indexed`:idx.status;return `<tr data-obs-project="${E(p.project_id)}" tabindex="0"><td><strong>${E(p.name)}</strong><small>${E(p.project_id)} · ${E(p.public_url||'URL 없음')}</small></td><td>${chip(s.seo_status||'not_checked')}</td><td>${chip(s.aeo_status||'not_checked')}</td><td>${chip(s.geo_status||'not_checked')}</td><td>${chip(s.readiness||'not_checked')}</td><td>${chip(vs.state,vs.label)}</td><td>${chip(idx.status==='unknown'?'unknown':'pass',idxLabel)}</td><td>${chip(s.sitemap?.status||'not_checked')}</td><td>${chip(s.robots?.status||'not_checked')}</td><td>${chip(nc)}</td><td><span>${s.last_check?dt(s.last_check):'-'}</span></td></tr>`}).join(''):'<tr><td colspan="11" class="obs-empty">조건에 맞는 프로젝트가 없습니다.</td></tr>';
-    qa('tr[data-obs-project]',body).forEach(r=>r.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openProject(r.dataset.obsProject)}}));
+    body.innerHTML=rows.length?rows.map(p=>{const s=p.search||{},idx=s.google_index||{},nc=p.namecard_status==='normal'?'pass':'fail',vs=videoSEOState(p);const idxLabel=idx.status==='unknown'?'Unknown':idx.indexed!=null?`${num(idx.indexed)} indexed`:idx.status;return `<tr><td><div class="obs-project-cell"><span><strong>${E(p.name)}</strong><small>${E(p.project_id)} · ${E(p.public_url||'URL 없음')}</small></span><button class="obs-detail-button compact" data-obs-detail-project="${E(p.project_id)}" aria-label="${E(p.name)} 상세 보기">상세</button></div></td><td>${chip(s.seo_status||'not_checked')}</td><td>${chip(s.aeo_status||'not_checked')}</td><td>${chip(s.geo_status||'not_checked')}</td><td>${chip(s.readiness||'not_checked')}</td><td>${chip(vs.state,vs.label)}</td><td>${chip(idx.status==='unknown'?'unknown':'pass',idxLabel)}</td><td>${chip(s.sitemap?.status||'not_checked')}</td><td>${chip(s.robots?.status||'not_checked')}</td><td>${chip(nc)}</td><td><span>${s.last_check?dt(s.last_check):'-'}</span></td></tr>`}).join(''):'<tr><td colspan="11" class="obs-empty">조건에 맞는 프로젝트가 없습니다.</td></tr>';
   }
 
   async function openProject(id){
