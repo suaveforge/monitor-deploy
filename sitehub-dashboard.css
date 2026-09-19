@@ -56,3 +56,33 @@ body.monitor-mode-sitehub #sitehubObservability{color:#0f172a!important}
 .obs-issues .obs-term{border-bottom-color:#94a3b8}
 .obs-search-table th .obs-term{color:inherit}
 @media(max-width:720px){.obs-growth-summary{grid-template-columns:1fr 1fr}.obs-growth-summary>span:last-child{grid-column:1/-1}}
+
+
+/* MONITOR_UX_V0685 */
+.obs-trend .obs-card-head{align-items:flex-start}
+.obs-trend-help{margin:5px 0 0;color:#64748b;font-size:10px;line-height:1.45}
+.obs-trend-picker{display:grid;gap:5px;min-width:260px}
+.obs-trend-picker>span{font-size:9px;font-weight:900;letter-spacing:.06em;color:#64748b;text-transform:uppercase}
+.obs-trend-picker select{width:100%;min-height:38px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;padding:0 34px 0 11px;color:#0f172a;font-size:11px;font-weight:800}
+.obs-ranking button.active{outline:2px solid #2563eb;outline-offset:-2px;background:#eff6ff}
+.obs-status-row[data-obs-chart-project]{cursor:pointer}
+.obs-trend-loading{display:flex;align-items:center;gap:9px;min-height:170px;justify-content:center;color:#475569;font-size:12px}
+.obs-trend-loading i{width:16px;height:16px;border:2px solid #cbd5e1;border-top-color:#2563eb;border-radius:50%;animation:obs-spin .75s linear infinite}
+.obs-hover-plot{position:relative;cursor:crosshair;touch-action:pan-y}
+.obs-hover-plot>svg{display:block;width:100%}
+.obs-hover-line{position:absolute;top:0;bottom:0;width:1px;background:#64748b;opacity:0;pointer-events:none;z-index:5;box-shadow:0 0 0 1px rgba(255,255,255,.45)}
+.obs-hover-line.show{opacity:.72}
+.obs-hover-tooltip{position:absolute;top:10px;min-width:126px;max-width:210px;padding:9px 10px;border-radius:9px;background:rgba(15,23,42,.96);color:#fff;box-shadow:0 10px 28px rgba(15,23,42,.28);opacity:0;visibility:hidden;pointer-events:none;z-index:8;transform:translateX(11px)}
+.obs-hover-tooltip.flip{transform:translateX(calc(-100% - 11px))}
+.obs-hover-tooltip.show{opacity:1;visibility:visible}
+.obs-hover-tooltip>strong{display:block;margin-bottom:6px;color:#fff;font-size:10px;white-space:nowrap}
+.obs-hover-tooltip>span{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:3px;font-size:10px}
+.obs-hover-tooltip>span b{color:#cbd5e1;font-weight:700}
+.obs-hover-tooltip>span em{color:#fff;font-style:normal;font-weight:900}
+.obs-mini-trend .obs-hover-plot>svg{height:125px}
+.obs-chart>.obs-hover-plot>svg{height:230px}
+@media(max-width:720px){
+  .obs-trend .obs-card-head{display:grid;grid-template-columns:1fr}
+  .obs-trend-picker{min-width:0;width:100%}
+  .obs-hover-tooltip{top:6px;min-width:112px;padding:8px}
+}
