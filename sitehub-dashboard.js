@@ -1,6 +1,6 @@
 (()=>{
   'use strict';
-  const state={view:'operations',days:7,data:null,project:null,loading:false,lastFetched:0,refreshTimer:null};
+  const state={view:'operations',days:7,data:null,project:null,loading:false,lastFetched:0,refreshTimer:null,selectedProjectId:'',selectedProjectData:null,selectedProjectDays:0,selectedProjectLoading:false,selectedProjectError:''};
   const q=(s,r=document)=>r.querySelector(s),qa=(s,r=document)=>[...r.querySelectorAll(s)];
   const E=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const num=v=>new Intl.NumberFormat('ko-KR').format(Number(v||0));
@@ -74,6 +74,8 @@
     q('#monitorTabSearch')?.addEventListener('click',()=>setView('search'));
     for(const id of ['#monitorTabOperations','#monitorTabActions'])q(id)?.addEventListener('click',exitObservability);
     document.addEventListener('click',e=>{
+      const chartProject=e.target.closest('[data-obs-chart-project]');
+      if(chartProject){e.preventDefault();selectAnalyticsProject(chartProject.dataset.obsChartProject);return}
       const b=e.target.closest('[data-obs-project]');if(b)openProject(b.dataset.obsProject);
       if(e.target.closest('[data-obs-close]'))q('#obsProjectDialog')?.close();
     });
@@ -103,11 +105,29 @@
     throw new Error('Monitor API 연결을 준비하지 못했습니다.');
   }
 
+  async function loadSelectedProject(force=false){
+    const id=String(state.selectedProjectId||'').trim();
+    if(!id){state.selectedProjectData=null;state.selectedProjectDays=0;state.selectedProjectError='';state.selectedProjectLoading=false;return}
+    if(!force&&state.selectedProjectData&&state.selectedProjectDays===state.days&&state.selectedProjectData.projects?.[0]?.project_id===id)return;
+    state.selectedProjectLoading=true;state.selectedProjectError='';
+    try{state.selectedProjectData=await request(`/api/sitehub/projects/${encodeURIComponent(id)}?days=${state.days}`);state.selectedProjectDays=state.days}
+    catch(e){state.selectedProjectData=null;state.selectedProjectDays=state.days;state.selectedProjectError=e?.message||String(e)}
+    finally{state.selectedProjectLoading=false}
+  }
+  async function selectAnalyticsProject(id){
+    state.selectedProjectId=String(id||'').trim();
+    state.selectedProjectData=null;state.selectedProjectDays=0;state.selectedProjectError='';
+    if(!state.selectedProjectId){renderAnalytics();return}
+    state.selectedProjectLoading=true;renderAnalytics();
+    await loadSelectedProject(true);
+    renderAnalytics();
+    q('.obs-trend')?.scrollIntoView({behavior:'smooth',block:'center'});
+  }
   async function load(force=false){
     if(state.loading)return;
-    if(!force&&state.data&&Date.now()-state.lastFetched<45000){render();return}
+    if(!force&&state.data&&Date.now()-state.lastFetched<45000){if(state.selectedProjectId)await loadSelectedProject(false);render();return}
     state.loading=true;renderLoading();
-    try{state.data=await request(`/api/sitehub/dashboard?days=${state.days}`);state.lastFetched=Date.now();render()}
+    try{state.data=await request(`/api/sitehub/dashboard?days=${state.days}`);state.lastFetched=Date.now();if(state.selectedProjectId)await loadSelectedProject(true);render()}
     catch(e){renderError(e?.message||String(e))}
     finally{state.loading=false}
   }
@@ -151,13 +171,17 @@
     const delta=t.vs_yesterday_pct==null?'어제 데이터 없음':`${Number(t.vs_yesterday_pct)>=0?'+':''}${pct(t.vs_yesterday_pct)} vs 어제`;
     const receiving=app.webProjects.filter(p=>p.analytics_status==='normal').sort((a,b)=>Number(b.today_pv)-Number(a.today_pv));
     const attention=app.webProjects.filter(p=>p.analytics_status!=='normal');
+    const selectedRow=app.webProjects.find(p=>p.project_id===state.selectedProjectId)||null;
+    const selectedReady=state.selectedProjectId&&state.selectedProjectData&&state.selectedProjectDays===state.days&&state.selectedProjectData.projects?.[0]?.project_id===state.selectedProjectId;
+    const trendRows=state.selectedProjectId?(selectedReady?(state.selectedProjectData.traffic?.trend||[]):[]):(t.trend||[]);
+    const trendName=selectedRow?.name||state.selectedProjectId||'전체 프로젝트';
     root.innerHTML=`
       <div class="obs-head"><div><p class="eyebrow">SITEHUB ANALYTICS</p><h2>전체 Analytics</h2><p>Monitor registry ${num(tot.registry_projects)}개 프로젝트의 SiteHub 수집 상태와 유입을 한 화면에서 봅니다.</p></div><div class="obs-head-actions"><button class="button" id="obsRefresh">새로고침</button><span>마지막 ${ago(d.generated_at)}</span></div></div>
       ${periodControls()}
       <div class="obs-metrics">${metric('오늘 PV',num(t.today_pv),delta,'','pv')}${metric('오늘 UV',num(t.today_uv),'익명 visitor 기준','','uv')}${metric('최근 7일 PV',num(t.pv_7d),`UV ${num(t.uv_7d)}`,'','pv')}${metric('최근 30일 PV',num(t.pv_30d),`UV ${num(t.uv_30d)}`,'','pv')}${metric('정상 수집',`${num(app.analyticsNormal)} / ${num(app.webTotal)}`,`미설치 ${num(app.analyticsMissing)} · 장기미수신 ${num(app.analyticsStale)} · 해당 없음 ${num(app.notApplicable)}`,app.analyticsIssue?'attention':'','analytics')}${metric('SiteHub 적용',`${num(tot.sitehub_connected)} / ${num(tot.registry_projects)}`,`미적용 ${num(tot.sitehub_missing)}`,tot.sitehub_missing?'attention':'') }</div>
-      ${renderTrend(t.trend||[])}
+      ${renderTrend(trendRows,app.webProjects,state.selectedProjectId,trendName,state.selectedProjectLoading,state.selectedProjectError)}
       <div class="obs-two-col">
-        <article class="obs-card"><div class="obs-card-head"><div><span class="metric-kicker">PROJECTS</span><h3>상위 프로젝트</h3></div><small>선택 기간 ${state.days}일</small></div>${renderRankedProjects(t.top_projects||[])}</article>
+        <article class="obs-card"><div class="obs-card-head"><div><span class="metric-kicker">PROJECTS</span><h3>상위 프로젝트</h3></div><small>클릭하면 위 그래프가 해당 프로젝트로 전환 · 선택 기간 ${state.days}일</small></div>${renderRankedProjects(t.top_projects||[])}</article>
         <article class="obs-card"><div class="obs-card-head"><div><span class="metric-kicker">COLLECTION</span><h3>Analytics 수집 상태</h3></div><small>${num(attention.length)}개 확인 필요</small></div><div class="obs-status-list">${receiving.slice(0,6).map(p=>statusLine(p,'normal')).join('')}${attention.slice(0,10).map(p=>statusLine(p,p.analytics_status)).join('')||'<p class="obs-empty">확인 필요한 프로젝트가 없습니다.</p>'}</div></article>
       </div>
       <div class="obs-two-col">
@@ -165,18 +189,49 @@
         <article class="obs-card"><div class="obs-card-head"><div><span class="metric-kicker">REFERRER</span><h3>주요 유입 경로</h3></div></div>${renderReferrers(t.top_referrers||[])}</article>
       </div>`;
     bindPeriod();
+    q('#obsTrendProject')?.addEventListener('change',e=>selectAnalyticsProject(e.target.value));
+    bindTrendHovers(root);
   }
 
   function linePoints(rows,key,max,w=900,h=230,p=28){return rows.map((x,i)=>`${p+(i/Math.max(1,rows.length-1))*(w-p*2)},${h-p-(Number(x?.[key]||0)/Math.max(1,max))*(h-p*2)}`).join(' ')}
-  function trendDelta(rows,key='pv'){if(rows.length<2)return '';const first=Number(rows[0]?.[key]||0),last=Number(rows[rows.length-1]?.[key]||0);if(first<=0)return last>0?'신규 유입 발생':'';const d=(last-first)/first*100;return `시작일 대비 ${d>=0?'+':''}${d.toFixed(1)}%`}
-  function renderTrend(rows){
-    if(!rows.length)return `<article class="obs-card obs-trend"><div class="obs-card-head"><div><span class="metric-kicker">TRAFFIC TREND</span><h3>기간별 방문 추이</h3></div></div><p class="obs-empty">집계된 트래픽이 없습니다.</p></article>`;
-    const vals=rows.flatMap(x=>[Number(x.pv||0),Number(x.uv||0)]),max=Math.max(1,...vals),w=900,h=230,p=28,pvPts=linePoints(rows,'pv',max,w,h,p),uvPts=linePoints(rows,'uv',max,w,h,p);
-    return `<article class="obs-card obs-trend"><div class="obs-card-head"><div><span class="metric-kicker">TRAFFIC TREND</span><h3>기간별 방문 추이</h3></div><small>${term('PV','pv')} · ${term('UV','uv')}</small></div><div class="obs-chart"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="PV와 UV 일별 추이"><polyline class="pv" points="${pvPts}"></polyline><polyline class="uv" points="${uvPts}"></polyline></svg><div class="obs-chart-legend"><span><i class="pv"></i>PV</span><span><i class="uv"></i>UV</span><strong>${E(trendDelta(rows,'pv'))}</strong></div><div class="obs-chart-axis"><span>${E(dayLabel(rows[0]?.day||''))}</span><strong>최고 ${num(max)}</strong><span>${E(dayLabel(rows[rows.length-1]?.day||''))}</span></div></div></article>`
+  const fullDayLabel=v=>{const d=validDate(v);return d?new Intl.DateTimeFormat('ko-KR',{year:'numeric',month:'long',day:'numeric'}).format(d):String(v||'')};
+  function hoverData(rows,keys){return E(JSON.stringify((rows||[]).map(r=>{const x={day:r?.day||r?.date||''};for(const key of keys)x[key]=Number(r?.[key]||0);return x})))}
+  function bindTrendHovers(root=document){
+    qa('.obs-hover-plot[data-trend]',root).forEach(plot=>{
+      if(plot.dataset.hoverBound==='1')return;plot.dataset.hoverBound='1';
+      let rows=[],series=[];try{rows=JSON.parse(plot.dataset.trend||'[]');series=JSON.parse(plot.dataset.series||'[]')}catch{return}
+      if(!rows.length)return;
+      const line=q('.obs-hover-line',plot),tip=q('.obs-hover-tooltip',plot),w=Number(plot.dataset.w||900),pad=Number(plot.dataset.pad||0);
+      const hide=()=>{line?.classList.remove('show');tip?.classList.remove('show')};
+      const show=e=>{
+        const rect=plot.getBoundingClientRect();if(!rect.width)return;
+        const left=(pad/w)*rect.width,right=rect.width-left,usable=Math.max(1,right-left);
+        const raw=Math.max(left,Math.min(right,e.clientX-rect.left));
+        const idx=rows.length===1?0:Math.max(0,Math.min(rows.length-1,Math.round(((raw-left)/usable)*(rows.length-1))));
+        const x=rows.length===1?left:left+(idx/(rows.length-1))*usable,row=rows[idx];
+        if(line){line.style.left=`${x}px`;line.classList.add('show')}
+        if(tip){
+          tip.innerHTML=`<strong>${E(fullDayLabel(row.day))}</strong>${series.map(([key,label])=>`<span><b>${E(label)}</b><em>${num(row[key])}</em></span>`).join('')}`;
+          tip.style.left=`${x}px`;tip.classList.toggle('flip',x>rect.width*.68);tip.classList.add('show');
+        }
+      };
+      plot.addEventListener('pointermove',show);plot.addEventListener('pointerleave',hide);plot.addEventListener('pointercancel',hide);
+    });
   }
-  function renderRankedProjects(rows){if(!rows.length)return '<p class="obs-empty">집계 데이터가 없습니다.</p>';const max=Math.max(1,...rows.map(x=>Number(x.pv||0)));return `<div class="obs-ranking">${rows.slice(0,12).map((p,i)=>`<button data-obs-project="${E(p.project_id)}"><em>${i+1}</em><span><b>${E(p.name||p.project_id)}</b><small>${E(p.project_id)} · UV ${num(p.uv)} · 클릭하면 프로젝트별 30일 추이</small><i style="--bar:${Math.max(3,Number(p.pv||0)/max*100)}%"></i></span><strong>${num(p.pv)}<small>PV</small></strong></button>`).join('')}</div>`}
+  function trendDelta(rows,key='pv'){if(rows.length<2)return '';const first=Number(rows[0]?.[key]||0),last=Number(rows[rows.length-1]?.[key]||0);if(first<=0)return last>0?'신규 유입 발생':'';const d=(last-first)/first*100;return `시작일 대비 ${d>=0?'+':''}${d.toFixed(1)}%`}
+  function renderTrend(rows,projects=[],selectedId='',selectedName='전체 프로젝트',loading=false,error=''){
+    const options=[...projects].sort((a,b)=>String(a.name||a.project_id).localeCompare(String(b.name||b.project_id),'ko')).map(p=>`<option value="${E(p.project_id)}" ${p.project_id===selectedId?'selected':''}>${E(p.name||p.project_id)} · ${E(p.project_id)}</option>`).join('');
+    const picker=`<label class="obs-trend-picker"><span>그래프 프로젝트</span><select id="obsTrendProject"><option value="" ${selectedId?'':'selected'}>전체 프로젝트</option>${options}</select></label>`;
+    if(loading)return `<article class="obs-card obs-trend"><div class="obs-card-head"><div><span class="metric-kicker">TRAFFIC TREND</span><h3>${E(selectedName)} 방문 추이</h3></div>${picker}</div><div class="obs-trend-loading"><i></i><strong>프로젝트 일별 데이터를 불러오는 중</strong></div></article>`;
+    if(error)return `<article class="obs-card obs-trend"><div class="obs-card-head"><div><span class="metric-kicker">TRAFFIC TREND</span><h3>${E(selectedName)} 방문 추이</h3></div>${picker}</div><div class="obs-error"><strong>프로젝트 그래프 조회 실패</strong><p>${E(error)}</p></div></article>`;
+    if(!rows.length)return `<article class="obs-card obs-trend"><div class="obs-card-head"><div><span class="metric-kicker">TRAFFIC TREND</span><h3>${E(selectedName)} 방문 추이</h3></div>${picker}</div><p class="obs-empty">선택 기간에 집계된 일별 트래픽이 없습니다.</p></article>`;
+    const vals=rows.flatMap(x=>[Number(x.pv||0),Number(x.uv||0)]),max=Math.max(1,...vals),w=900,h=230,p=28,pvPts=linePoints(rows,'pv',max,w,h,p),uvPts=linePoints(rows,'uv',max,w,h,p);
+    const data=hoverData(rows,['pv','uv']),series=E(JSON.stringify([['pv','PV'],['uv','UV']]));
+    return `<article class="obs-card obs-trend"><div class="obs-card-head"><div><span class="metric-kicker">TRAFFIC TREND</span><h3>${E(selectedName)} 방문 추이</h3><p class="obs-trend-help">프로젝트를 바꿔가며 같은 그래프에서 확인합니다. 그래프 위에 마우스를 올리면 날짜별 PV·UV가 표시됩니다.</p></div>${picker}</div><div class="obs-chart"><div class="obs-hover-plot" data-trend='${data}' data-series='${series}' data-w="${w}" data-pad="${p}"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="PV와 UV 일별 추이"><polyline class="pv" points="${pvPts}"></polyline><polyline class="uv" points="${uvPts}"></polyline></svg><i class="obs-hover-line"></i><div class="obs-hover-tooltip"></div></div><div class="obs-chart-legend"><span><i class="pv"></i>PV</span><span><i class="uv"></i>UV</span><strong>${E(trendDelta(rows,'pv'))}</strong></div><div class="obs-chart-axis"><span>${E(dayLabel(rows[0]?.day||''))}</span><strong>최고 ${num(max)}</strong><span>${E(dayLabel(rows[rows.length-1]?.day||''))}</span></div></div></article>`
+  }
+  function renderRankedProjects(rows){if(!rows.length)return '<p class="obs-empty">집계 데이터가 없습니다.</p>';const max=Math.max(1,...rows.map(x=>Number(x.pv||0)));return `<div class="obs-ranking">${rows.slice(0,12).map((p,i)=>`<button data-obs-chart-project="${E(p.project_id)}" class="${state.selectedProjectId===p.project_id?'active':''}"><em>${i+1}</em><span><b>${E(p.name||p.project_id)}</b><small>${E(p.project_id)} · UV ${num(p.uv)} · 클릭하면 위 그래프 전환</small><i style="--bar:${Math.max(3,Number(p.pv||0)/max*100)}%"></i></span><strong>${num(p.pv)}<small>PV</small></strong></button>`).join('')}</div>`}
   function eventAge(p){const d=validDate(p?.last_event_at);if(d)return `마지막 ${ago(d)}`;if(['missing_loader','no_events'].includes(p?.analytics_status))return '수집 기록 없음';return '기록 없음'}
-  function statusLine(p,s){return `<button class="obs-status-row" data-obs-project="${E(p.project_id)}"><span>${chip(s)}</span><b>${E(p.name||p.project_id)}</b><small>${eventAge(p)}</small><strong>${num(p.today_pv)} PV</strong></button>`}
+  function statusLine(p,s){return `<button class="obs-status-row" data-obs-chart-project="${E(p.project_id)}"><span>${chip(s)}</span><b>${E(p.name||p.project_id)}</b><small>${eventAge(p)}</small><strong>${num(p.today_pv)} PV</strong></button>`}
   function renderPages(rows){if(!rows.length)return '<p class="obs-empty">페이지 데이터가 없습니다.</p>';return `<div class="obs-simple-table">${rows.slice(0,14).map(x=>`<button data-obs-project="${E(x.project_id)}"><span><b>${E(x.pathname||'/')}</b><small>${E(x.hostname||'')} · ${E(x.project_id)}</small></span><strong>${num(x.pv)} PV</strong></button>`).join('')}</div>`}
   function renderReferrers(rows){if(!rows.length)return '<p class="obs-empty">referrer 데이터가 없습니다.</p>';return `<div class="obs-simple-table">${rows.slice(0,14).map(x=>`<button data-obs-project="${E(x.project_id)}"><span><b>${E(x.referrer_host||'Direct / Unknown')}</b><small>${E(x.project_id)}</small></span><strong>${num(x.pv)} PV</strong></button>`).join('')}</div>`}
 
@@ -210,13 +265,14 @@
       <div class="obs-dialog-grid"><section><h3>방문 분석 · 최근 30일</h3><div class="obs-dialog-metrics"><span><small>${term('PV','pv')}</small><strong>${num(p.pv_30d)}</strong></span><span><small>${term('UV','uv')}</small><strong>${num(p.uv_30d)}</strong></span><span><small>${term('마지막 수집','lastcollect')}</small><strong>${!applicable?'해당 없음':validDate(p.last_event_at)?ago(p.last_event_at):'수집 기록 없음'}</strong></span></div>${renderProjectVisitTrend(t.trend||[])}<div class="obs-detail-subhead">${term('상위 페이지','pages')}</div>${renderPages(t.top_pages||[])}<div class="obs-detail-subhead">${term('주요 유입 경로','referrer')}</div>${renderReferrers(t.top_referrers||[])}</section>
       <section><h3>검색 노출·기술 상태</h3>${applicable?renderSearchExposureTrend(s)+searchEvidence(s,idx,p)+videoSEOEvidence(s,p):'<p class="obs-empty">웹 운영 URL이 없어 SearchOps 적용 대상이 아닙니다.</p>'}</section></div>
       <section class="obs-issues"><div class="obs-card-head"><div><span class="metric-kicker">ISSUES & ALERTS</span><h3>${term('확인할 항목','issues')}</h3></div><small>${num(errors.length)}건</small></div>${errors.length?`<ul>${errors.map(x=>`<li>${E(explainAlert(x))}</li>`).join('')}</ul>`:'<p class="obs-empty">현재 표시할 경고가 없습니다.</p>'}</section>`;
+    bindTrendHovers(body);
   }
   function renderProjectVisitTrend(rows){
     if(!rows.length)return '<div class="obs-mini-trend empty"><strong>프로젝트별 방문 증가 추이</strong><p>일별 PV/UV 데이터가 아직 없습니다.</p></div>';
     const w=620,h=150,pad=18,max=Math.max(1,...rows.flatMap(x=>[Number(x.pv||0),Number(x.uv||0)])),first=rows[0]||{},last=rows[rows.length-1]||{};
     const firstPV=Number(first.pv||0),lastPV=Number(last.pv||0),delta=firstPV>0?((lastPV-firstPV)/firstPV*100):null;
-    const change=delta==null?(lastPV>0?'신규 방문 발생':'변화 없음'):`${delta>=0?'+':''}${delta.toFixed(1)}%`;
-    return `<div class="obs-mini-trend"><div class="obs-mini-trend-head"><strong>프로젝트별 방문 증가 추이</strong><span>${term('PV','pv')} · ${term('UV','uv')}</span></div><div class="obs-growth-summary"><span><small>첫날 PV</small><strong>${num(firstPV)}</strong></span><span><small>최근일 PV</small><strong>${num(lastPV)}</strong></span><span><small>기간 변화</small><strong class="${delta!=null&&delta<0?'down':'up'}">${E(change)}</strong></span></div><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="프로젝트 일별 PV와 UV 추이"><polyline class="pv" points="${linePoints(rows,'pv',max,w,h,pad)}"></polyline><polyline class="uv" points="${linePoints(rows,'uv',max,w,h,pad)}"></polyline></svg><div class="obs-chart-axis"><span>${E(dayLabel(first.day||''))}</span><strong>최고 ${num(max)}</strong><span>${E(dayLabel(last.day||''))}</span></div><p class="obs-trend-note">이 그래프는 <b>방문(PV/UV)</b> 증가 추이입니다. Google 검색 결과의 실제 <b>노출</b>은 Search Console 데이터가 연결될 때 오른쪽의 별도 검색 노출 그래프로 표시합니다.</p></div>`;
+    const change=delta==null?(lastPV>0?'신규 방문 발생':'변화 없음'):`${delta>=0?'+':''}${delta.toFixed(1)}%`,data=hoverData(rows,['pv','uv']),series=E(JSON.stringify([['pv','PV'],['uv','UV']]));
+    return `<div class="obs-mini-trend"><div class="obs-mini-trend-head"><strong>프로젝트별 방문 증가 추이</strong><span>${term('PV','pv')} · ${term('UV','uv')} · 그래프에 마우스를 올려 일별 값 확인</span></div><div class="obs-growth-summary"><span><small>첫날 PV</small><strong>${num(firstPV)}</strong></span><span><small>최근일 PV</small><strong>${num(lastPV)}</strong></span><span><small>기간 변화</small><strong class="${delta!=null&&delta<0?'down':'up'}">${E(change)}</strong></span></div><div class="obs-hover-plot" data-trend='${data}' data-series='${series}' data-w="${w}" data-pad="${pad}"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="프로젝트 일별 PV와 UV 추이"><polyline class="pv" points="${linePoints(rows,'pv',max,w,h,pad)}"></polyline><polyline class="uv" points="${linePoints(rows,'uv',max,w,h,pad)}"></polyline></svg><i class="obs-hover-line"></i><div class="obs-hover-tooltip"></div></div><div class="obs-chart-axis"><span>${E(dayLabel(first.day||''))}</span><strong>최고 ${num(max)}</strong><span>${E(dayLabel(last.day||''))}</span></div><p class="obs-trend-note">이 그래프는 <b>방문(PV/UV)</b> 증가 추이입니다. Google 검색 결과의 실제 <b>노출</b>은 Search Console 데이터가 연결될 때 오른쪽의 별도 검색 노출 그래프로 표시합니다.</p></div>`;
   }
   function renderSearchExposureTrend(s){
     const sc=s?.search_console||s?.google_search_console||{};
@@ -225,7 +281,8 @@
     if(!usable.length)return `<div class="obs-index-box obs-exposure-wait"><strong>${term('검색 노출 추이','impressions')}</strong><p>검증된 Google Search Console 일별 노출·클릭 데이터가 아직 SiteHub에서 제공되지 않아 그래프를 그릴 수 없습니다. 아래 방문 추이(PV/UV)와는 다른 지표입니다.</p></div>`;
     const w=620,h=150,pad=18,max=Math.max(1,...usable.flatMap(x=>[Number(x.impressions||0),Number(x.clicks||0)]));
     const normalized=usable.map(x=>({...x,day:x.day||x.date}));
-    return `<div class="obs-mini-trend search-exposure"><div class="obs-mini-trend-head"><strong>${term('Google 검색 노출 추이','impressions')}</strong><span>노출 · 클릭</span></div><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="Google 검색 노출과 클릭 추이"><polyline class="pv" points="${linePoints(normalized,'impressions',max,w,h,pad)}"></polyline><polyline class="uv" points="${linePoints(normalized,'clicks',max,w,h,pad)}"></polyline></svg><div class="obs-chart-axis"><span>${E(dayLabel(normalized[0]?.day||''))}</span><strong>최고 노출 ${num(Math.max(...normalized.map(x=>Number(x.impressions||0))))}</strong><span>${E(dayLabel(normalized[normalized.length-1]?.day||''))}</span></div></div>`;
+    const data=hoverData(normalized,['impressions','clicks']),series=E(JSON.stringify([['impressions','검색 노출'],['clicks','클릭']]));
+    return `<div class="obs-mini-trend search-exposure"><div class="obs-mini-trend-head"><strong>${term('Google 검색 노출 추이','impressions')}</strong><span>노출 · 클릭 · 그래프에 마우스를 올려 일별 값 확인</span></div><div class="obs-hover-plot" data-trend='${data}' data-series='${series}' data-w="${w}" data-pad="${pad}"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="Google 검색 노출과 클릭 추이"><polyline class="pv" points="${linePoints(normalized,'impressions',max,w,h,pad)}"></polyline><polyline class="uv" points="${linePoints(normalized,'clicks',max,w,h,pad)}"></polyline></svg><i class="obs-hover-line"></i><div class="obs-hover-tooltip"></div></div><div class="obs-chart-axis"><span>${E(dayLabel(normalized[0]?.day||''))}</span><strong>최고 노출 ${num(Math.max(...normalized.map(x=>Number(x.impressions||0))))}</strong><span>${E(dayLabel(normalized[normalized.length-1]?.day||''))}</span></div></div>`;
   }
   function videoSEOEvidence(s,p){
     const v=s?.video_seo;
