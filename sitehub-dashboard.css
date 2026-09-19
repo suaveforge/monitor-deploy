@@ -140,3 +140,5 @@ body.monitor-mode-sitehub #sitehubObservability{color:#0f172a!important}
   .obs-ranking-row{grid-template-columns:minmax(0,1fr) 44px}
   .obs-status-row-wrap{grid-template-columns:minmax(0,1fr) 44px}
 }
+
+.obs-ranking .obs-detail-button{display:inline-flex!important;align-items:center!important;justify-content:center!important;grid-template-columns:none!important;padding:0 10px!important;text-align:center!important}
