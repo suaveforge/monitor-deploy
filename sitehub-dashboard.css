@@ -42,3 +42,17 @@ body.monitor-mode-sitehub #sitehubObservability{color:#0f172a!important}
 .obs-detail-subhead{margin:14px 0 6px;font-size:10px;font-weight:900;color:#64748b;text-transform:uppercase;letter-spacing:.05em}
 .obs-exposure-wait{border-style:dashed!important}
 @media(max-width:720px){.obs-term::after{left:auto;right:0;width:min(300px,82vw)}.obs-mini-trend-head{align-items:flex-start;flex-direction:column}.obs-chart-legend strong{display:none}}
+
+
+/* MONITOR_UX_V0684 */
+.obs-growth-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:2px 0 10px}
+.obs-growth-summary>span{display:grid;gap:2px;padding:8px 10px;border:1px solid #dbe5f0;background:#fff;border-radius:9px}
+.obs-growth-summary small{font-size:9px;color:#64748b}
+.obs-growth-summary strong{font-size:13px;color:#0f172a}
+.obs-growth-summary strong.up{color:#047857}.obs-growth-summary strong.down{color:#be123c}
+.obs-trend-note{margin:9px 0 0;padding:8px 10px;border-radius:8px;background:#eef6ff;color:#475569;font-size:10px;line-height:1.55}
+.obs-trend-note b{color:#1d4ed8}
+.obs-ranking button small{line-height:1.35}
+.obs-issues .obs-term{border-bottom-color:#94a3b8}
+.obs-search-table th .obs-term{color:inherit}
+@media(max-width:720px){.obs-growth-summary{grid-template-columns:1fr 1fr}.obs-growth-summary>span:last-child{grid-column:1/-1}}
