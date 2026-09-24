@@ -24,6 +24,8 @@
     aeo:'답변형 검색 점검(AEO)은 질문·답변형 검색이나 AI 답변이 페이지 내용을 구조적으로 추출하기 쉬운지 확인합니다.',
     geo:'생성형 검색 점검(GEO)은 생성형 검색·AI 시스템이 페이지의 핵심 정보를 이해하고 인용하기 쉬운 구조인지 확인합니다.',
     readiness:'검색 준비도는 SEO·AEO·GEO와 크롤링 관련 기술 점검을 합쳐 현재 검색 노출 준비가 되었는지 보여주는 기술 상태입니다. 실제 Google 노출량 자체는 아닙니다.',
+    technical:'Technical Ready는 robots·sitemap·canonical·indexability·Googlebot parity 등 검색엔진 접근을 위한 기술 준비 상태입니다. 실제 Google 검색 노출 성공을 뜻하지 않습니다.',
+    serp:'SERP 실노출은 Google Search Console의 실제 노출·클릭과 색인 증거를 기준으로 판단합니다. 기술 준비가 PASS여도 impressions가 없으면 성공으로 표시하지 않습니다.',
     canonical:'Canonical은 같은 내용의 여러 URL 중 검색엔진이 대표 주소로 취급해야 할 URL을 선언하는 값입니다.',
     googlebot:'Googlebot parity는 일반 방문자와 Googlebot이 실질적으로 같은 핵심 콘텐츠를 받는지 확인합니다.',
     sitemap:'Sitemap은 검색엔진에 공개 URL 목록과 갱신 정보를 알려주는 파일입니다.',
@@ -287,23 +289,55 @@
 
   function visState(v){const s=String(v||'UNKNOWN').toUpperCase();return s==='PASS'?'pass':s==='PARTIAL'?'warn':s==='FAIL'?'fail':'unknown'}
   function visLabel(v){const s=String(v||'UNKNOWN').toUpperCase();return s==='PASS'?'PROVEN':s==='PARTIAL'?'PARTIAL':s==='FAIL'?'FAIL':'UNKNOWN'}
+  function searchCountRatio(v,doneKey,totalKey,boolKey){
+    const done=v?.[doneKey],total=v?.[totalKey];
+    if(done!=null&&total!=null)return `<strong>${num(done)}</strong><small>/ ${num(total)} URL</small>`;
+    const b=v?.[boolKey];return chip(b===true?'pass':b===false?'fail':'unknown',b===true?'확인':'미확인');
+  }
+  function renderSearchPipeline(ps,app){
+    const web=ps.filter(obsWebApplicable);
+    const crawled=web.filter(p=>p.visibility?.crawled===true).length;
+    const indexed=web.filter(p=>p.visibility?.indexed===true).length;
+    const impressionProjects=web.filter(p=>Number(p.visibility?.impressions_28d||0)>0).length;
+    const queryProjects=web.filter(p=>Number(p.visibility?.query_count_28d||0)>0).length;
+    const clickProjects=web.filter(p=>Number(p.visibility?.clicks_28d||0)>0).length;
+    const posRows=web.map(p=>p.visibility||{}).filter(v=>Number(v.impressions_28d||0)>0&&Number.isFinite(Number(v.avg_position_28d)));
+    const posDen=posRows.reduce((a,v)=>a+Number(v.impressions_28d||0),0);
+    const avgPos=posDen>0?posRows.reduce((a,v)=>a+Number(v.avg_position_28d||0)*Number(v.impressions_28d||0),0)/posDen:null;
+    const step=(label,value,note,state='')=>`<div class="obs-search-pipeline-step ${state}"><span>${E(label)}</span><strong>${E(value)}</strong><small>${E(note)}</small></div>`;
+    return `<div class="obs-search-pipeline" aria-label="Google 검색 흐름">
+      ${step('1 크롤링',`${num(crawled)} / ${num(app.webTotal)}`,'GSC crawl 확인')}
+      ${step('2 색인',`${num(indexed)} / ${num(app.webTotal)}`,'URL Inspection')}
+      ${step('3 실제 노출',`${num(impressionProjects)}개`,'28일 노출 발생')}
+      ${step('4 실제 검색어',`${num(queryProjects)}개`,'query 데이터 있음')}
+      ${step('5 클릭',`${num(clickProjects)}개`,'28일 클릭 발생')}
+      ${step('6 평균순위',avgPos==null?'-':avgPos.toFixed(1),'노출 가중 · 28일')}
+    </div>`;
+  }
   function renderSearch(){
     const d=state.data,ps=d.projects||[];const app=obsApplicability(d.totals||{},ps),root=q('#sitehubObservability');if(!root)return;
-    const web=ps.filter(obsWebApplicable),visible=web.filter(p=>p.visibility?.serp_visibility_status==='PASS').length,partial=web.filter(p=>p.visibility?.serp_visibility_status==='PARTIAL').length,failed=web.filter(p=>p.visibility?.serp_visibility_status==='FAIL').length,unknown=web.length-visible-partial-failed;
-    const indexed=web.filter(p=>p.visibility?.indexed===true).length,impressions=web.filter(p=>Number(p.visibility?.impressions_28d||0)>0).length,clicks=web.filter(p=>Number(p.visibility?.clicks_28d||0)>0).length;
     root.innerHTML=`
-      <div class="obs-head"><div><p class="eyebrow">SITEHUB SEARCH VISIBILITY</p><h2>검색 실노출 관제</h2><p>기술 구현 상태와 실제 Google SERP 성과를 분리합니다. 측정값이 없으면 PASS로 추정하지 않습니다.</p></div><div class="obs-head-actions"><button class="button" id="obsRefresh">새로고침</button><span>마지막 ${ago(d.generated_at)}</span></div></div>
-      <div class="obs-metrics search-metrics">${metric('Technical Ready',`${num((web.filter(p=>p.visibility?.tech_ready===true).length))} / ${num(app.webTotal)}`,'robots · sitemap · canonical · crawl','','technical')}${metric('Indexed',`${num(indexed)} / ${num(app.webTotal)}`,'GSC URL Inspection','','googleindex')}${metric('Impressions 28d',`${num(impressions)} projects`,'실제 Google 노출 > 0','','impressions')}${metric('Clicks 28d',`${num(clicks)} projects`,'실제 Google 클릭 > 0','','clicks')}${metric('SERP Visibility',`${num(visible)} proven`,`PARTIAL ${num(partial)} · FAIL ${num(failed)} · UNKNOWN ${num(unknown)}`,failed?'attention':'','serp')}</div>
+      <div class="obs-head"><div><p class="eyebrow">SITEHUB SEARCH VISIBILITY</p><h2>검색 실노출 관제</h2><p>크롤링 → 색인 → 실제 노출 → 실제 검색어 → 클릭 → 평균순위를 한 흐름으로 봅니다. 상세에서 실제 검색어를 확인할 수 있습니다.</p></div><div class="obs-head-actions"><button class="button" id="obsRefresh">새로고침</button><span>마지막 ${ago(d.generated_at)}</span></div></div>
+      ${renderSearchPipeline(ps,app)}
       <article class="obs-card obs-search-card">
-        <div class="obs-card-head"><div><span class="metric-kicker">EVIDENCE FIRST</span><h3>프로젝트별 Google 검색 실효성</h3></div><div class="obs-search-filter"><input id="obsSearchFilter" type="search" placeholder="프로젝트·도메인 검색"><select id="obsSearchState"><option value="all">전체 상태</option><option value="fail">SERP FAIL</option><option value="partial">SERP PARTIAL</option><option value="proven">Visibility PROVEN</option><option value="unknown">UNKNOWN</option></select></div></div>
-        <div class="obs-search-table-wrap"><table class="obs-search-table"><thead><tr><th>프로젝트</th><th>Technical</th><th>Indexed</th><th>Impressions 28d</th><th>Clicks 28d</th><th>Target Query</th><th>Avg Position</th><th>Organic Sessions</th><th>SERP</th><th>대표 장애</th><th>최근 갱신</th></tr></thead><tbody id="obsSearchRows"></tbody></table></div>
+        <div class="obs-card-head"><div><span class="metric-kicker">GOOGLE SEARCH CONSOLE</span><h3>프로젝트별 검색 흐름</h3></div><div class="obs-search-filter"><input id="obsSearchFilter" type="search" placeholder="프로젝트·도메인 검색"><select id="obsSearchState"><option value="all">전체 상태</option><option value="fail">SERP FAIL</option><option value="partial">SERP PARTIAL</option><option value="proven">Visibility PROVEN</option><option value="unknown">UNKNOWN</option></select></div></div>
+        <div class="obs-search-table-wrap"><table class="obs-search-table obs-search-flow-table"><thead><tr><th>프로젝트</th><th>크롤링</th><th>색인</th><th>실제 노출</th><th>실제 검색어</th><th>클릭</th><th>평균순위</th><th>SERP</th></tr></thead><tbody id="obsSearchRows"></tbody></table></div>
       </article>`;
     const draw=()=>renderSearchRows(ps);draw();q('#obsRefresh')?.addEventListener('click',()=>load(true));q('#obsSearchFilter')?.addEventListener('input',draw);q('#obsSearchState')?.addEventListener('change',draw);
   }
   function renderSearchRows(ps){
     const body=q('#obsSearchRows');if(!body)return;const term=(q('#obsSearchFilter')?.value||'').trim().toLowerCase(),flt=q('#obsSearchState')?.value||'all';
     const rows=ps.filter(obsWebApplicable).filter(p=>{const v=p.visibility||{};if(term&&!`${p.project_id} ${p.name} ${p.public_url}`.toLowerCase().includes(term))return false;if(flt==='fail'&&v.serp_visibility_status!=='FAIL')return false;if(flt==='partial'&&v.serp_visibility_status!=='PARTIAL')return false;if(flt==='proven'&&v.serp_visibility_status!=='PASS')return false;if(flt==='unknown'&&v.serp_visibility_status!=='UNKNOWN'&&v.serp_visibility_status)return false;return true});
-    body.innerHTML=rows.length?rows.map(p=>{const v=p.visibility||{},s=p.search||{};const tqTotal=Number(v.target_query_total||0),tqObserved=Number(v.target_query_observed||0);return `<tr><td><div class="obs-project-cell"><span><strong>${E(p.name)}</strong><small>${E(p.project_id)} · ${E(p.public_url||'URL 없음')}</small></span><button class="obs-detail-button compact" data-obs-detail-project="${E(p.project_id)}" aria-label="${E(p.name)} 상세 보기">상세</button></div></td><td>${chip(v.tech_ready===true?'pass':v.tech_ready===false?'fail':'unknown')}</td><td>${chip(v.indexing_status==='PASS'?'pass':v.indexing_status==='FAIL'?'fail':'unknown',v.indexed===true?'Indexed':v.indexed===false?'Not indexed':'Unknown')}</td><td><strong>${v.impressions_28d==null?'-':num(v.impressions_28d)}</strong></td><td><strong>${v.clicks_28d==null?'-':num(v.clicks_28d)}</strong></td><td><strong>${tqTotal?`${num(tqObserved)}/${num(tqTotal)}`:'미등록'}</strong>${Number(v.target_query_wrong_page||0)>0?`<small> · wrong page ${num(v.target_query_wrong_page)}</small>`:''}</td><td><strong>${v.avg_position_28d==null?'-':Number(v.avg_position_28d).toFixed(1)}</strong></td><td><strong>${v.organic_search_sessions_28d==null?'-':num(v.organic_search_sessions_28d)}</strong></td><td>${chip(visState(v.serp_visibility_status),visLabel(v.serp_visibility_status))}</td><td><small>${E((v.evidence?.priority_issues||[])[0]?.code||v.primary_issue||'UNKNOWN')}</small></td><td><span>${v.last_updated_at?dt(v.last_updated_at):s.last_check?dt(s.last_check):'-'}</span></td></tr>`}).join(''):'<tr><td colspan="11" class="obs-empty">조건에 맞는 프로젝트가 없습니다.</td></tr>';
+    body.innerHTML=rows.length?rows.map(p=>{const v=p.visibility||{};return `<tr>
+      <td><div class="obs-project-cell"><span><strong>${E(p.name)}</strong><small>${E(p.project_id)} · ${E(p.public_url||'URL 없음')}</small></span><button class="obs-detail-button compact" data-obs-detail-project="${E(p.project_id)}" aria-label="${E(p.name)} 상세 보기">상세</button></div></td>
+      <td><div class="obs-stage-cell">${searchCountRatio(v,'crawled_urls','candidate_urls','crawled')}</div></td>
+      <td><div class="obs-stage-cell">${searchCountRatio(v,'indexed_urls','candidate_urls','indexed')}</div></td>
+      <td><strong>${v.impressions_28d==null?'-':num(v.impressions_28d)}</strong></td>
+      <td><strong>${v.query_count_28d==null?'-':num(v.query_count_28d)}</strong></td>
+      <td><strong>${v.clicks_28d==null?'-':num(v.clicks_28d)}</strong></td>
+      <td><strong>${v.avg_position_28d==null?'-':Number(v.avg_position_28d).toFixed(1)}</strong></td>
+      <td>${chip(visState(v.serp_visibility_status),visLabel(v.serp_visibility_status))}</td>
+    </tr>`}).join(''):'<tr><td colspan="8" class="obs-empty">조건에 맞는 프로젝트가 없습니다.</td></tr>';
   }
 
   async function openProject(id){
@@ -311,14 +345,39 @@
     try{const d=await request(`/api/sitehub/projects/${encodeURIComponent(id)}?days=30`);renderProjectDialog(d)}catch(e){body.innerHTML=`<div class="modal-head"><div><p class="eyebrow">PROJECT DETAIL</p><h2>상세 조회 실패</h2></div><button class="icon-button" data-obs-close aria-label="닫기">×</button></div><div class="obs-error"><p>${E(e?.message||String(e))}</p></div>`}
   }
   function renderProjectDialog(d){
-    const p=d.projects?.[0];if(!p)return;const body=q('#obsProjectDialogBody'),t=d.traffic||{},s=p.search||{},idx=s.google_index||{};const applicable=obsWebApplicable(p),ncStatus=applicable?(p.namecard_status==='normal'?'pass':'fail'):'not_applicable',analyticsStatus=applicable?(p.analytics_status||'unknown'):'not_applicable',searchStatus=applicable?(s.readiness||'not_checked'):'not_applicable',video=videoSEOState(p),rawErrors=[...(s.errors||[]),...(p.alerts||[]),...video.alerts],errors=applicable?rawErrors:rawErrors.filter(x=>{const v=String(typeof x==='string'?x:'');return v!=='namecard_fail'&&!v.startsWith('analytics_')&&!v.startsWith('search_')&&v!=='sitemap_fail'&&v!=='robots_fail'});
+    const p=d.projects?.[0];if(!p)return;const body=q('#obsProjectDialogBody'),t=d.traffic||{},s=p.search||{},idx=s.google_index||{},diag=p.search_diagnostics||{};const applicable=obsWebApplicable(p),ncStatus=applicable?(p.namecard_status==='normal'?'pass':'fail'):'not_applicable',analyticsStatus=applicable?(p.analytics_status||'unknown'):'not_applicable',searchStatus=applicable?(s.readiness||'not_checked'):'not_applicable',video=videoSEOState(p),rawErrors=[...(s.errors||[]),...(p.alerts||[]),...video.alerts],errors=applicable?rawErrors:rawErrors.filter(x=>{const v=String(typeof x==='string'?x:'');return v!=='namecard_fail'&&!v.startsWith('analytics_')&&!v.startsWith('search_')&&v!=='sitemap_fail'&&v!=='robots_fail'});
     body.innerHTML=`<div class="modal-head"><div><p class="eyebrow">${E(p.project_id)} · SITEHUB</p><h2>${E(p.name)}</h2><p class="obs-dialog-url">${p.public_url?`<a href="${E(p.public_url)}" target="_blank" rel="noreferrer">${E(p.public_url)}</a>`:'운영 URL 없음'}</p></div><button class="icon-button" data-obs-close aria-label="닫기">×</button></div>
-      <div class="obs-detail-strip"><span><small>${term('서비스 상태','service')}</small>${chip(p.service_status)}</span><span><small>${term('페이지 기본정보','namecard')}</small>${chip(ncStatus)}</span><span><small>${term('방문 수집','analytics')}</small>${chip(analyticsStatus)}</span><span><small>${term('검색 준비도','readiness')}</small>${chip(s.readiness||'not_checked')}</span><span><small>${term('영상 검색','videoseo')}</small>${chip(video.state,video.label)}</span></div>
+      <div class="obs-detail-strip"><span><small>${term('서비스 상태','service')}</small>${chip(p.service_status)}</span><span><small>${term('페이지 기본정보','namecard')}</small>${chip(ncStatus)}</span><span><small>${term('방문 수집','analytics')}</small>${chip(analyticsStatus)}</span><span><small>${term('Technical Ready','technical')}</small>${chip(p.visibility?.tech_ready===true?'pass':p.visibility?.tech_ready===false?'fail':'unknown')}</span><span><small>${term('SERP 실노출','serp')}</small>${chip(visState(p.visibility?.serp_visibility_status),visLabel(p.visibility?.serp_visibility_status))}</span><span><small>${term('영상 검색','videoseo')}</small>${chip(video.state,video.label)}</span></div>
       <div class="obs-dialog-grid"><section><h3>방문 분석 · 최근 30일</h3><div class="obs-dialog-metrics"><span><small>${term('PV','pv')}</small><strong>${num(p.pv_30d)}</strong></span><span><small>${term('고유 브라우저 (UV)','uv')}</small><strong>${num(p.uv_30d)}</strong></span><span><small>${term('마지막 수집','lastcollect')}</small><strong>${!applicable?'해당 없음':validDate(p.last_event_at)?ago(p.last_event_at):'수집 기록 없음'}</strong></span></div>${renderProjectVisitTrend(t.trend||[])}<div class="obs-detail-subhead">${term('상위 페이지','pages')}</div>${renderPages(t.top_pages||[])}<div class="obs-detail-subhead">${term('주요 유입 경로','referrer')}</div>${renderReferrers(t.top_referrers||[])}</section>
-      <section><h3>검색 노출·기술 상태</h3>${applicable?renderSearchExposureTrend(s)+searchEvidence(s,idx,p)+videoSEOEvidence(s,p):'<p class="obs-empty">웹 운영 URL이 없어 SearchOps 적용 대상이 아닙니다.</p>'}</section></div>
+      <section><h3>검색 노출·기술 상태</h3>${applicable?renderProjectSearchFlow(p)+renderActualQueries(diag.top_queries||[])+renderSearchExposureTrend(s)+searchEvidence(s,idx,p)+videoSEOEvidence(s,p):'<p class="obs-empty">웹 운영 URL이 없어 SearchOps 적용 대상이 아닙니다.</p>'}</section></div>
       <section class="obs-issues"><div class="obs-card-head"><div><span class="metric-kicker">ISSUES & ALERTS</span><h3>${term('확인할 항목','issues')}</h3></div><small>${num(errors.length)}건</small></div>${errors.length?`<ul>${errors.map(x=>`<li>${E(explainAlert(x))}</li>`).join('')}</ul>`:'<p class="obs-empty">현재 표시할 경고가 없습니다.</p>'}</section>`;
     bindTrendHovers(body);
   }
+  function renderProjectSearchFlow(p){
+    const v=p?.visibility||{};
+    const stage=(label,value,note,state)=>`<div class="obs-project-search-step ${state||''}"><span>${E(label)}</span><strong>${E(value)}</strong><small>${E(note)}</small></div>`;
+    const crawl=v.crawled_urls==null?(v.crawled===true?'확인':v.crawled===false?'미완료':'-'):`${num(v.crawled_urls)} / ${num(v.candidate_urls||0)}`;
+    const index=v.indexed_urls==null?(v.indexed===true?'확인':v.indexed===false?'미완료':'-'):`${num(v.indexed_urls)} / ${num(v.candidate_urls||0)}`;
+    return `<div class="obs-project-search-flow">
+      ${stage('크롤링',crawl,'URL')}
+      ${stage('색인',index,'URL')}
+      ${stage('노출',v.impressions_28d==null?'-':num(v.impressions_28d),'28일')}
+      ${stage('검색어',v.query_count_28d==null?'-':num(v.query_count_28d),'실제 query')}
+      ${stage('클릭',v.clicks_28d==null?'-':num(v.clicks_28d),'28일')}
+      ${stage('평균순위',v.avg_position_28d==null?'-':Number(v.avg_position_28d).toFixed(1),'28일')}
+    </div>`;
+  }
+  function queryRow(x){
+    const ctr=x?.ctr==null?'-':`${(Number(x.ctr)*100).toFixed(1)}%`;
+    return `<div class="obs-query-row"><b title="${E(x?.query||'')}">${E(x?.query||'-')}</b><span>${num(x?.impressions||0)}</span><span>${num(x?.clicks||0)}</span><span>${ctr}</span><span>${x?.position==null?'-':Number(x.position).toFixed(1)}</span></div>`;
+  }
+  function renderActualQueries(rows){
+    rows=Array.isArray(rows)?rows.filter(x=>x&&x.query):[];
+    if(!rows.length)return '<div class="obs-index-box obs-query-empty"><strong>실제 검색어 · 28일</strong><p>Search Console에서 관측된 검색어가 아직 없습니다.</p></div>';
+    const first=rows.slice(0,5),rest=rows.slice(5,30);
+    return `<div class="obs-query-box"><div class="obs-query-head"><span><strong>실제 검색어 · 28일</strong><small>노출순 · 상위 ${num(Math.min(rows.length,30))}개</small></span></div><div class="obs-query-row head"><b>검색어</b><span>노출</span><span>클릭</span><span>CTR</span><span>순위</span></div>${first.map(queryRow).join('')}${rest.length?`<details class="obs-query-more"><summary>검색어 ${num(rest.length)}개 더 보기</summary><div>${rest.map(queryRow).join('')}</div></details>`:''}</div>`;
+  }
+
   function renderProjectVisitTrend(rows){
     if(!rows.length)return '<div class="obs-mini-trend empty"><strong>프로젝트별 방문 증가 추이</strong><p>일별 PV/고유 브라우저(UV) 데이터가 아직 없습니다.</p></div>';
     const w=620,h=150,pad=18,max=Math.max(1,...rows.flatMap(x=>[Number(x.pv||0),Number(x.uv||0)])),first=rows[0]||{},last=rows[rows.length-1]||{};

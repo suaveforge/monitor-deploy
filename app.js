@@ -156,33 +156,41 @@ function renderActions(){
   const tabBadge=$('#actionsTabBadge'),tabActive=Number(sum.queued||0)+Number(sum.in_progress||0);if(tabBadge){tabBadge.textContent=String(tabActive);tabBadge.hidden=tabActive===0;}
 
   const source=a.runner_source||'',permissionLimited=a.token_state==='runner_permission_limited'||source==='workflow_jobs';
-  $('#actionsRunnerName').textContent=runners.length?`${runners.length}대 runner pool`:'runner pool 확인 대기';
+  $('#actionsRunnerName').textContent=runners.length?`${runners.length}대 server123 자동 추적`:'runner 확인 대기';
   const runnerState=$('#actionsRunnerState'),runnerPanel=$('#actionsRunnerPanel'),current=$('#actionsRunnerCurrent');
   const offline=runners.filter(r=>['offline','missing'].includes(String(r.status||'').toLowerCase())).length;
   const busy=runners.filter(r=>!!r.busy).length;
   const online=runners.filter(r=>String(r.status||'').toLowerCase()==='online').length;
   let rst='unknown',rlabel='미검출';
-  if(permissionLimited){rst='queued';rlabel='권한 제한'}
+  if(permissionLimited){rst=busy?'in_progress':'queued';rlabel=busy?`실행 ${busy} · 관찰 ${runners.length}`:`관찰 ${runners.length}`}
   else if(offline>0){rst='offline';rlabel=`OFFLINE ${offline}`}
   else if(runners.length&&busy===runners.length){rst='busy';rlabel=`BUSY ${busy}/${runners.length}`}
   else if(runners.length){rst='idle';rlabel=`사용 ${busy}/${runners.length}`}
   runnerState.className=`actions-state ${actionSeverityClass(rst)}`;runnerState.textContent=rlabel;runnerPanel.classList.toggle('critical',!permissionLimited&&offline>0);
 
-  if(!runners.length){current.className='actions-panel-body muted';current.textContent='runner pool을 아직 관찰하지 못했습니다.'}
+  if(!runners.length){current.className='actions-panel-body muted';current.textContent='server123 runner를 아직 관찰하지 못했습니다.'}
   else{
     current.className='actions-panel-body';
-    current.innerHTML=`<div class="actions-runner-pool">${runners.map(r=>{
+    const roleOrder=['공용 배포','JUMPROPE 연구','JUMPROPE 배포','범용 연구','server123 전용'];
+    const groups=new Map();
+    for(const r of runners){const role=r.role||'server123 전용';if(!groups.has(role))groups.set(role,[]);groups.get(role).push(r)}
+    const ordered=[...groups.entries()].sort((a,b)=>{const ai=roleOrder.indexOf(a[0]),bi=roleOrder.indexOf(b[0]);return (ai<0?99:ai)-(bi<0?99:bi)||a[0].localeCompare(b[0])});
+    const card=r=>{
       const st=String(r.status||'unknown').toLowerCase();
       let tone='unknown',label='상태 미확인';
       if(st==='online'&&r.busy){tone='in_progress';label='BUSY'}
       else if(st==='online'){tone='success';label='IDLE'}
       else if(st==='offline'||st==='missing'){tone='failure';label=st==='offline'?'OFFLINE':'미검출'}
       else if(st==='observed'){tone='queued';label='최근 관찰'}
-      else if(permissionLimited){tone='unknown';label='권한 제한'}
-      const work=r.current_job?`<small>${esc(r.current_repository||'-')} · ${esc(r.current_job)} · ${actionDuration(r.current_seconds)}</small>`:`<small>${permissionLimited?'조직 runner API 권한 연결 시 online/idle 확인 가능':'현재 점유 작업 없음'}</small>`;
-      const labels=(r.labels||[]).join(' · ');
-      return `<div class="actions-runner-card"><div><strong>${esc(r.name||'runner')}</strong><em class="actions-state ${tone}">${label}</em></div>${work}<span>${esc(r.os||'')}${labels?` · ${esc(labels)}`:''}</span></div>`
-    }).join('')}</div>`;
+      else if(permissionLimited){tone='unknown';label='상태 미확인'}
+      let work='';
+      if(r.current_job)work=`<small>${esc(r.current_repository||'-')} · ${esc(r.current_job)} · ${actionDuration(r.current_seconds)}</small>`;
+      else if(r.last_observed_at)work=`<small>최근 ${esc(r.last_repository||'-')} · ${since(r.last_observed_at)}${r.last_job?` · ${esc(r.last_job)}`:''}</small>`;
+      else work=`<small>${permissionLimited?'실행 기록이 잡히면 자동 추적 · online/idle은 권한 연결 시 확정':'현재 점유 작업 없음'}</small>`;
+      const labels=(r.labels||[]).filter(x=>!['self-hosted','Linux','X64','linux','x64','server123'].includes(x)).join(' · ');
+      return `<div class="actions-runner-card"><div><strong>${esc(r.name||'runner')}</strong><em class="actions-state ${tone}">${label}</em></div>${work}<span>${esc(r.role||'server123 전용')}${labels?` · ${esc(labels)}`:''}</span></div>`;
+    };
+    current.innerHTML=`<div class="actions-runner-groups">${ordered.map(([role,items])=>{const active=items.filter(r=>r.busy).length;return `<details class="actions-runner-group" ${active?'open':''}><summary><span><b>${esc(role)}</b><small>${items.length}대${active?` · 실행 ${active}`:''}</small></span><strong>보기</strong></summary><div class="actions-runner-pool">${items.map(card).join('')}</div></details>`}).join('')}</div>`;
   }
 
   const targetQueue=queue.filter(q=>q.targets_target_runner),otherQueue=queue.filter(q=>!q.targets_target_runner);

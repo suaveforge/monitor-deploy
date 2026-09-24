@@ -70,3 +70,13 @@
 .actions-runner-card small{font-size:10px;color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .actions-runner-card>span{font-size:9px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .runner-panel .actions-panel-body{max-height:260px;overflow:auto}
+
+
+/* DYNAMIC_SERVER123_RUNNERS_V0687 */
+.actions-runner-groups{display:grid;gap:7px}
+.actions-runner-group{border:1px solid #dbe3ee;border-radius:10px;background:#fff;overflow:hidden}
+.actions-runner-group>summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;cursor:pointer;background:#f8fafc}
+.actions-runner-group>summary::-webkit-details-marker{display:none}
+.actions-runner-group>summary span{display:grid;gap:1px}.actions-runner-group>summary b{font-size:10px;color:#0f172a}.actions-runner-group>summary small{font-size:8px;color:#64748b}.actions-runner-group>summary strong{font-size:8px;color:#2563eb}
+.actions-runner-group[open]>summary{border-bottom:1px solid #e2e8f0}.actions-runner-group[open]>summary strong{font-size:0}.actions-runner-group[open]>summary strong::after{content:'접기';font-size:8px}
+.actions-runner-group .actions-runner-pool{padding:7px;background:#fbfdff}.actions-runner-group .actions-runner-card{box-shadow:none}
