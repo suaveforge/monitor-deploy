@@ -182,10 +182,12 @@ function renderActions(){
       else if(st==='online'){tone='success';label='IDLE'}
       else if(st==='offline'||st==='missing'){tone='failure';label=st==='offline'?'OFFLINE':'미검출'}
       else if(st==='observed'){tone='queued';label='최근 관찰'}
+      else if(st==='registered'){tone='queued';label='로컬 등록'}
       else if(permissionLimited){tone='unknown';label='상태 미확인'}
       let work='';
       if(r.current_job)work=`<small>${esc(r.current_repository||'-')} · ${esc(r.current_job)} · ${actionDuration(r.current_seconds)}</small>`;
       else if(r.last_observed_at)work=`<small>최근 ${esc(r.last_repository||'-')} · ${since(r.last_observed_at)}${r.last_job?` · ${esc(r.last_job)}`:''}</small>`;
+      else if(r.registered_local)work='<small>123 서버 등록 확인 · online/idle은 GitHub runner 권한 연결 시 확정</small>';
       else work=`<small>${permissionLimited?'실행 기록이 잡히면 자동 추적 · online/idle은 권한 연결 시 확정':'현재 점유 작업 없음'}</small>`;
       const labels=(r.labels||[]).filter(x=>!['self-hosted','Linux','X64','linux','x64','server123'].includes(x)).join(' · ');
       return `<div class="actions-runner-card"><div><strong>${esc(r.name||'runner')}</strong><em class="actions-state ${tone}">${label}</em></div>${work}<span>${esc(r.role||'server123 전용')}${labels?` · ${esc(labels)}`:''}</span></div>`;
