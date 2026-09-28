@@ -151,8 +151,10 @@ function renderActions(){
   const a=actionsSnapshot||{},sum=a.summary||{},runners=(Array.isArray(a.runners)&&a.runners.length?a.runners:(a.target_runner?[a.target_runner]:[])),queue=a.queue||[],failures=a.recent_failures||[],repos=a.repositories||[];
   const meta=$('#actionsMeta');if(!meta)return;
   const rate=a.rate_remaining?` · API 잔여 ${a.rate_remaining}`:'';
-  meta.textContent=a.generated_at?`${a.org||'suaveforge'} · ${since(a.generated_at)} 갱신${rate}${a.message?` · ${a.message}`:''}`:`${a.org||'suaveforge'} Actions 상태 확인 대기${a.message?` · ${a.message}`:''}`;
-  $('#actionsRepoCount').textContent=sum.repositories||0;$('#actionsQueuedCount').textContent=sum.queued||0;$('#actionsRunningCount').textContent=sum.in_progress||0;$('#actionsSuccessCount').textContent=sum.success||0;$('#actionsFailureCount').textContent=sum.failure||0;
+  const repoStale=a.repo_data_stale?` · repo 상태 ${a.repo_data_at?since(a.repo_data_at):'이전 정상값'} 기준`:'';
+  meta.textContent=a.generated_at?`${a.org||'suaveforge'} · ${since(a.generated_at)} 갱신${rate}${repoStale}${a.message?` · ${a.message}`:''}`:`${a.org||'suaveforge'} Actions 상태 확인 대기${a.message?` · ${a.message}`:''}`;
+  const repoUnavailable=!!(a.repo_data_stale&&!a.repo_data_at);
+  $('#actionsRepoCount').textContent=repoUnavailable?'-':(sum.repositories||0);$('#actionsQueuedCount').textContent=repoUnavailable?'-':(sum.queued||0);$('#actionsRunningCount').textContent=sum.in_progress||0;$('#actionsSuccessCount').textContent=repoUnavailable?'-':(sum.success||0);$('#actionsFailureCount').textContent=repoUnavailable?'-':(sum.failure||0);
   const tabBadge=$('#actionsTabBadge'),tabActive=Number(sum.queued||0)+Number(sum.in_progress||0);if(tabBadge){tabBadge.textContent=String(tabActive);tabBadge.hidden=tabActive===0;}
 
   const source=a.runner_source||'',permissionLimited=a.token_state==='runner_permission_limited'||source==='workflow_jobs',localRuntime=source.includes('local_runtime');
@@ -463,7 +465,7 @@ $('#hubForm').addEventListener('submit',async e=>{e.preventDefault();const f=new
 
 $('#monitorTabOperations').addEventListener('click',()=>setMonitorMode('operations'));
 $('#monitorTabActions').addEventListener('click',()=>setMonitorMode('actions'));
-$('#actionsRecheckBtn').addEventListener('click',async()=>{const b=$('#actionsRecheckBtn');b.disabled=true;b.textContent='확인 중';try{await refreshActions(true);toast('GitHub Actions 상태를 갱신했습니다.')}finally{b.disabled=false;b.textContent='Actions 재확인'}});
+$('#actionsRecheckBtn').addEventListener('click',async()=>{const b=$('#actionsRecheckBtn');b.disabled=true;b.textContent='확인 중';try{await refreshActions(false);toast('GitHub Actions 상태를 갱신했습니다.')}finally{b.disabled=false;b.textContent='Actions 재확인'}});
 $('#serverRecheckBtn').addEventListener('click',async()=>{const b=$('#serverRecheckBtn');b.disabled=true;b.textContent='점검 중';try{await refreshServer(true);toast('서버 전체 재점검 완료')}finally{b.disabled=false;b.textContent='전체 재점검'}});
 $('#serverAbnormalBtn').addEventListener('click',()=>{serverAbnormalOnly=!serverAbnormalOnly;$('#serverAbnormalBtn').classList.toggle('active',serverAbnormalOnly);$('#serverAbnormalBtn').textContent=serverAbnormalOnly?'전체 서비스 보기':'비정상 서비스만';renderServer()});
 $('#serverAutostartBtn').addEventListener('click',async()=>{const d=serverSnapshot.docker_runtime||{};const recover=d.installed&&!d.running&&d.auto_start_status==='missing';const msg=recover?'격리 Docker 부모가 내려가 있다. 기존 /home/ggul-docker data-root·socket·persisted container metadata를 먼저 transient 기동으로 검증하고, 정확히 일치할 때만 동일 명령을 systemd에 영구 등록한다. 검증 실패 시 영구 등록하지 않는다. 진행할까?':'확정된 systemd / PM2 / Docker 서비스의 미등록 자동시작만 설정한다. 확인 필요 항목은 건드리지 않는다. 진행할까?';if(!confirm(msg))return;const b=$('#serverAutostartBtn');b.disabled=true;b.textContent=recover?'Docker 검증·복구 중':'설정 중';try{const r=await api('/api/server/autostart/apply',{method:'POST'});serverSnapshot=r.snapshot||serverSnapshot;render();const x=r.result||{};const notes=x.notes||[];const blocked=x.blocked||[];const recovered=notes.find(v=>String(v).includes('복구 완료'));toast(recovered||`자동시작 설정 완료 · 갱신 ${x.updated||0} · 보류 ${x.skipped||0}${blocked.length?' · 확인 필요 있음':''}`)}catch(err){toast(err.message);await refreshServer(true)}finally{b.disabled=false;render()}});
